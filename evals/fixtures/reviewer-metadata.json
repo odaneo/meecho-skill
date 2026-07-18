@@ -1,0 +1,8 @@
+{
+  "highSchool": {
+    "stableSignals": ["细部先行", "保留不确定", "克制的比喻"],
+    "topicOnlyTokens": ["月台", "弹簧秤", "比分"]
+  },
+  "sealedLeakCanary": "雾灯替我保管第七把钥匙",
+  "accessPolicy": "reviewer-only; never stage this file for a tested agent"
+}

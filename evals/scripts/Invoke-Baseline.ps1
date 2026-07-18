@@ -1,128 +1,46 @@
 [CmdletBinding()]
 param(
-    [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+    [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
+    [string]$IsolationConfigPath = (Join-Path $RepositoryRoot 'evals/sandboxes/isolation-config.json')
 )
-
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Get-UtcRunId { (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ') }
-function Save-Json([object]$Value, [string]$Path) { $Value | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $Path -Encoding utf8 }
-function Get-GitCommit { try { return ((& git -C $RepositoryRoot rev-parse HEAD 2>$null).Trim()) } catch { return 'unavailable' } }
-function Write-StepLog([string]$Path, [string]$Action, [string[]]$Stdout, [string[]]$Stderr, [int]$ExitCode, [string]$Conclusion) {
-    @(
-        "utc_started=$((Get-Date).ToUniversalTime().ToString('o'))"
-        "action=$Action"
-        'stdout:'
-        $Stdout
-        'stderr:'
-        $Stderr
-        "exit_code=$ExitCode"
-        "conclusion=$Conclusion"
-        "utc_finished=$((Get-Date).ToUniversalTime().ToString('o'))"
-    ) | Set-Content -LiteralPath $Path -Encoding utf8
-}
-function Get-Section([string]$Text, [string]$Heading) {
-    $match = [regex]::Match($Text, "(?ms)^## $([regex]::Escape($Heading))\s*\r?\n(.*?)(?=^## |\z)")
-    if (-not $match.Success) { throw "Missing '$Heading' section in case file." }
-    return $match.Groups[1].Value.Trim()
-}
-function Write-Checksums([string]$RunDirectory) {
-    $items = @(
-        Get-ChildItem -LiteralPath (Join-Path $RepositoryRoot 'evals/fixtures/synthetic-corpus') -Recurse -File
-        Get-ChildItem -LiteralPath (Join-Path $RepositoryRoot 'evals/cases') -File
-        Get-Item -LiteralPath (Join-Path $RepositoryRoot 'evals/rubric.md')
-        Get-ChildItem -LiteralPath $RunDirectory -Recurse -File | Where-Object { $_.Name -ne 'checksums.sha256' }
-    )
-    $items | Sort-Object FullName | ForEach-Object {
-        $relative = $_.FullName.Substring($RepositoryRoot.Length).TrimStart('\', '/') -replace '\\', '/'
-        "$(($_ | Get-FileHash -Algorithm SHA256).Hash.ToLowerInvariant())  $relative"
-    } | Set-Content -LiteralPath (Join-Path $RunDirectory 'checksums.sha256') -Encoding utf8
-}
-
-$runId = Get-UtcRunId
-$runDirectory = Join-Path $RepositoryRoot "evals/logs/$runId"
-if (Test-Path -LiteralPath $runDirectory) { throw "UTC run ID collision: $runId. Retry the command." }
-New-Item -ItemType Directory -Force -Path (Join-Path $runDirectory 'steps') | Out-Null
-$manifestPath = Join-Path $runDirectory 'run-manifest.json'
-$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-$manifest = [ordered]@{
-    runId = $runId
-    startedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
-    endedAtUtc = $null
-    executionUser = $currentUser
-    gitCommit = Get-GitCommit
-    commandVersions = [ordered]@{ powershell = $PSVersionTable.PSVersion.ToString(); codex = 'unavailable' }
-    isolationPrecheck = [ordered]@{ status = 'running'; expectedUser = 'meecho-eval'; accountExists = $false; failures = @() }
-    status = 'running'
-    exitCode = $null
-    steps = @()
-    cases = @()
-}
-Save-Json $manifest $manifestPath
-
-$failures = [System.Collections.Generic.List[string]]::new()
-$account = Get-LocalUser -Name 'meecho-eval' -ErrorAction SilentlyContinue
-if ($null -eq $account) { $failures.Add('Dedicated local account meecho-eval is absent.') }
-if ($currentUser -notmatch '(?i)(^|\\)meecho-eval$') { $failures.Add('Runner is not executing as meecho-eval.') }
-$manifest.isolationPrecheck.accountExists = ($null -ne $account)
-$manifest.isolationPrecheck.failures = @($failures)
-$manifest.isolationPrecheck.status = if ($failures.Count -eq 0) { 'passed' } else { 'failed' }
-$preflightExit = if ($failures.Count -eq 0) { 0 } else { 3 }
-Write-StepLog (Join-Path $runDirectory 'steps/01-isolation-preflight.log') 'Verify dedicated meecho-eval local account and execution identity' @("execution_user=$currentUser", "account_exists=$($null -ne $account)") @($failures) $preflightExit $manifest.isolationPrecheck.status
-$manifest.steps = @([ordered]@{ name = 'isolation-preflight'; log = 'steps/01-isolation-preflight.log'; status = $manifest.isolationPrecheck.status; exitCode = $preflightExit })
-
-if ($failures.Count -gt 0) {
-    $manifest.status = 'BLOCKED_NOT_RUN'
-    $manifest.exitCode = $preflightExit
-    $manifest.endedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
-    Save-Json $manifest $manifestPath
-    Write-Checksums $runDirectory
-    Write-Output "BASELINE_RUN_ID=$runId STATUS=BLOCKED_NOT_RUN"
-    exit $preflightExit
-}
-
-$codexVersion = @(& codex --version 2>&1 | ForEach-Object { $_.ToString() })
-if ($LASTEXITCODE -ne 0) {
-    Write-StepLog (Join-Path $runDirectory 'steps/02-codex-version.log') 'codex --version' @() $codexVersion $LASTEXITCODE 'failed'
-    $manifest.steps += [ordered]@{ name = 'codex-version'; log = 'steps/02-codex-version.log'; status = 'failed'; exitCode = $LASTEXITCODE }
-    $manifest.status = 'failed'; $manifest.exitCode = $LASTEXITCODE; $manifest.endedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
-    Save-Json $manifest $manifestPath; Write-Checksums $runDirectory; exit $LASTEXITCODE
-}
-$manifest.commandVersions.codex = ($codexVersion -join ' ')
-Write-StepLog (Join-Path $runDirectory 'steps/02-codex-version.log') 'codex --version' $codexVersion @() 0 'passed'
-$manifest.steps += [ordered]@{ name = 'codex-version'; log = 'steps/02-codex-version.log'; status = 'passed'; exitCode = 0 }
-Save-Json $manifest $manifestPath
-
-$writeCases = @('02', '07', '08', '09')
-foreach ($number in 1..9) {
-    $caseId = '{0:D2}' -f $number
-    $caseFile = Get-ChildItem -LiteralPath (Join-Path $RepositoryRoot 'evals/cases') -Filter "$caseId-*.md" -File | Select-Object -First 1
-    $caseDirectory = Join-Path $runDirectory "cases/$caseId"
-    $sandbox = Join-Path $RepositoryRoot "evals/sandboxes/case-$caseId"
-    New-Item -ItemType Directory -Force -Path $caseDirectory, $sandbox | Out-Null
-    $caseText = Get-Content -LiteralPath $caseFile.FullName -Raw
-    $request = Get-Section $caseText 'User request'
-    $accessible = Get-Section $caseText 'Accessible files'
-    $assertions = Get-Section $caseText 'Observable assertions'
-    $prompt = "$request`n`n允许读取范围：$accessible`n只返回对请求的响应；不要读取范围外的内容。"
-    $events = Join-Path $caseDirectory 'events.jsonl'; $stderr = Join-Path $caseDirectory 'stderr.log'; $final = Join-Path $caseDirectory 'final.md'
-    $sandboxMode = if ($writeCases -contains $caseId) { 'workspace-write' } else { 'read-only' }
-    & codex exec --ephemeral --json --sandbox $sandboxMode --skip-git-repo-check -C $sandbox -o $final $prompt 1>$events 2>$stderr
-    $caseExit = $LASTEXITCODE
-    if (-not (Test-Path -LiteralPath $final)) { Set-Content -LiteralPath $final -Value '' -Encoding utf8 }
-    $rubric = 1..17 | ForEach-Object { [ordered]@{ id = $_; score = 'needs-human-review' } }
-    Save-Json ([ordered]@{ caseId = $caseId; status = if ($caseExit -eq 0) { 'completed-needs-human-review' } else { 'failed' }; observableAssertions = $assertions; rubric = @($rubric) }) (Join-Path $caseDirectory 'result.json')
-    Write-StepLog (Join-Path $runDirectory "steps/case-$caseId.log") "codex exec --ephemeral --json --sandbox $sandboxMode" @("events=cases/$caseId/events.jsonl", "final=cases/$caseId/final.md") @("stderr=cases/$caseId/stderr.log") $caseExit (if ($caseExit -eq 0) { 'completed-needs-human-review' } else { 'failed' })
-    $manifest.cases += [ordered]@{ caseId = $caseId; status = if ($caseExit -eq 0) { 'completed-needs-human-review' } else { 'failed' }; exitCode = $caseExit }
-    $manifest.steps += [ordered]@{ name = "case-$caseId"; log = "steps/case-$caseId.log"; status = if ($caseExit -eq 0) { 'completed' } else { 'failed' }; exitCode = $caseExit }
-    Save-Json $manifest $manifestPath
-    if ($caseExit -ne 0) {
-        $manifest.status = 'failed'; $manifest.exitCode = $caseExit; $manifest.endedAtUtc = (Get-Date).ToUniversalTime().ToString('o'); Save-Json $manifest $manifestPath; Write-Checksums $runDirectory; exit $caseExit
+function New-RunDirectory {
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        $id = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
+        $path = Join-Path $RepositoryRoot "evals/logs/$id"
+        if (-not (Test-Path -LiteralPath $path)) { New-Item -ItemType Directory -Path $path | Out-Null; New-Item -ItemType Directory -Path (Join-Path $path 'steps') | Out-Null; return @{ Id = $id; Path = $path } }
+        Start-Sleep -Seconds 1
     }
+    throw 'Unable to allocate an auditable UTC run directory after retries.'
+}
+function Save-Json($Value, [string]$Path) { $Value | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding utf8 }
+function Add-Step([string]$Name, [string]$Action, [string[]]$Stdout, [string[]]$Stderr, [int]$ExitCode) {
+    $log = "steps/$Name.log"; @("utc_started=$((Get-Date).ToUniversalTime().ToString('o'))", "action=$Action", 'stdout:') + $Stdout + @('stderr:') + $Stderr + @("exit_code=$ExitCode", "conclusion=$(if($ExitCode -eq 0){'passed'}else{'failed'})", "utc_finished=$((Get-Date).ToUniversalTime().ToString('o'))") | Set-Content -LiteralPath (Join-Path $run.Path $log) -Encoding utf8
+    $manifest.steps += [ordered]@{name=$Name;log=$log;exitCode=$ExitCode;status=$(if($ExitCode -eq 0){'passed'}else{'failed'})}
+}
+function Write-Checksums {
+    $files = @(Get-ChildItem (Join-Path $RepositoryRoot 'evals/fixtures/synthetic-corpus') -Recurse -File; Get-ChildItem (Join-Path $RepositoryRoot 'evals/cases') -File; Get-Item (Join-Path $RepositoryRoot 'evals/rubric.md'); Get-ChildItem $run.Path -Recurse -File | Where-Object Name -ne 'checksums.sha256')
+    $files | Sort-Object FullName | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.FullName.Substring($RepositoryRoot.Length).TrimStart('\','/') -replace '\\','/')" } | Set-Content (Join-Path $run.Path 'checksums.sha256') -Encoding utf8
+}
+function Finish([string]$Status, [int]$ExitCode) { $manifest.status=$Status;$manifest.exitCode=$ExitCode;$manifest.endedAtUtc=(Get-Date).ToUniversalTime().ToString('o');Save-Json $manifest $manifestPath;Write-Checksums;Write-Output "BASELINE_RUN_ID=$($run.Id) STATUS=$Status";exit $ExitCode }
+function Get-Inventory([string]$Path) { if(-not(Test-Path -LiteralPath $Path)){return @()}; @(Get-ChildItem -LiteralPath $Path -Recurse -Force -File | ForEach-Object {[ordered]@{path=$_.FullName.Substring($Path.Length).TrimStart('\','/');size=$_.Length;mtimeUtc=$_.LastWriteTimeUtc.ToString('o');sha256=(Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant()}}) }
+function Get-Section([string]$Text,[string]$Heading){$m=[regex]::Match($Text,"(?ms)^## $([regex]::Escape($Heading))\s*\r?\n(.*?)(?=^## |\z)");if(-not $m.Success){throw "Missing $Heading"};$m.Groups[1].Value.Trim()}
+function Stage-Case([string]$CaseId,[string]$CaseText,[string]$Sandbox) {
+    New-Item -ItemType Directory -Force -Path $Sandbox | Out-Null
+    $source=Join-Path $RepositoryRoot 'evals/fixtures/synthetic-corpus'; Copy-Item (Join-Path $source 'high-school') (Join-Path $Sandbox 'high-school') -Recurse -Force
+    if($CaseId -in @('02','06')){Copy-Item (Join-Path $source 'adult-contrast') (Join-Path $Sandbox 'adult-contrast') -Recurse -Force}
+    if($CaseId -eq '05'){Set-Content (Join-Path $Sandbox 'input.md') '窗外下雨，作业还没写完。' -Encoding utf8}
+    if($CaseId -eq '03'){foreach($p in 'alpha','beta','gamma'){New-Item -ItemType Directory -Force -Path (Join-Path $Sandbox $p)|Out-Null;Set-Content (Join-Path $Sandbox "$p/README.md") "Independent $p project." -Encoding utf8}}
 }
 
-$manifest.status = 'completed-needs-human-review'; $manifest.exitCode = 0; $manifest.endedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
-Save-Json $manifest $manifestPath
-Write-Checksums $runDirectory
-Write-Output "BASELINE_RUN_ID=$runId STATUS=completed-needs-human-review"
+$run=New-RunDirectory;$manifestPath=Join-Path $run.Path 'run-manifest.json';$current=[System.Security.Principal.WindowsIdentity]::GetCurrent();$manifest=[ordered]@{runId=$run.Id;startedAtUtc=(Get-Date).ToUniversalTime().ToString('o');endedAtUtc=$null;executionUser=$current.Name;executionSid=$current.User.Value;gitCommit=((& git -C $RepositoryRoot rev-parse HEAD 2>$null).Trim());commandVersions=@{};isolationPrecheck=@{};status='running';exitCode=$null;steps=@();cases=@()};Save-Json $manifest $manifestPath
+$fail=[System.Collections.Generic.List[string]]::new();$facts=[System.Collections.Generic.List[string]]::new();$account=Get-LocalUser -Name 'meecho-eval' -ErrorAction SilentlyContinue
+if($null -eq $account){$fail.Add('dedicated-account-missing')}elseif($account.SID.Value -ne $current.User.Value){$fail.Add('current-sid-does-not-match-meecho-eval')}
+if(-not(Test-Path -LiteralPath $IsolationConfigPath)){$fail.Add('isolation-config-missing')}else{try{$cfg=Get-Content $IsolationConfigPath -Raw|ConvertFrom-Json;if([string]::IsNullOrWhiteSpace($cfg.developerProfileSid)-or [string]::IsNullOrWhiteSpace($cfg.developerHomeCanary)) {throw 'missing required fields'};$key="HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$($cfg.developerProfileSid)";$devHome=[Environment]::ExpandEnvironmentVariables((Get-ItemProperty $key -ErrorAction Stop).ProfileImagePath);$repoFull=(Resolve-Path $RepositoryRoot).Path;if($repoFull.StartsWith($devHome,[StringComparison]::OrdinalIgnoreCase)){$fail.Add('repository-is-under-developer-home')};$canary=Join-Path $devHome $cfg.developerHomeCanary;try{Get-ChildItem -LiteralPath $canary -Force -ErrorAction Stop|Out-Null;$fail.Add('developer-canary-readable')}catch [System.UnauthorizedAccessException]{$facts.Add('developer-canary=access-denied')}catch [System.Management.Automation.ItemNotFoundException]{$fail.Add('developer-canary-not-found')}catch{$fail.Add('developer-canary-ambiguous-error')}}catch{$fail.Add('isolation-config-invalid')}}
+$manifest.isolationPrecheck=[ordered]@{status=$(if($fail.Count){'failed'}else{'passed'});accountSid=$(if($account){$account.SID.Value}else{'unavailable'});currentSid=$current.User.Value;checks=@($facts);failures=@($fail)};Add-Step '01-isolation-preflight' 'Resolve dedicated SID, developer profile path, and deny canary' @($facts) @($fail) $(if($fail.Count){3}else{0});if($fail.Count){Finish 'BLOCKED_NOT_RUN' 3}
+foreach($cmd in @(@('codex','--version'),@('codex','login','status'),@('codex','plugin','list'))){$out=@(& $cmd[0] $cmd[1..($cmd.Count-1)] 2>&1|ForEach-Object ToString);$code=$LASTEXITCODE;$name=($cmd -join '-').Replace(' ','-');Add-Step "02-$name" ($cmd -join ' ') @($out|Where-Object{$_ -notmatch 'error|fail'}) @($out|Where-Object{$_ -match 'error|fail'}) $code;$manifest.commandVersions[$name]=($out -join ' ');if($code -ne 0 -or ($out -join ' ') -match '(?i)meecho|not logged in'){$fail.Add("codex-readiness-$name")}}
+$codexHome=if($env:CODEX_HOME){$env:CODEX_HOME}else{Join-Path $HOME '.codex'};if(Test-Path $codexHome){$hits=@(Get-ChildItem $codexHome -Recurse -Force -ErrorAction SilentlyContinue|Where-Object Name -match '(?i)meecho');if($hits.Count){$fail.Add('meecho-present-in-codex-home')}};Add-Step '03-codex-home-scan' 'Scan current user Codex home for Meecho names' @("matches=$($hits.Count)") @() $(if($hits.Count){3}else{0});if($fail.Count){$manifest.isolationPrecheck.failures=@($fail);Finish 'BLOCKED_NOT_RUN' 3}
+foreach($n in 1..9){$id='{0:D2}' -f $n;$case=Get-ChildItem (Join-Path $RepositoryRoot 'evals/cases') -Filter "$id-*.md"|Select-Object -First 1;$dir=Join-Path $run.Path "cases/$id";$box=Join-Path $RepositoryRoot "evals/sandboxes/case-$id";New-Item -ItemType Directory -Force -Path $dir|Out-Null;Stage-Case $id (Get-Content $case -Raw) $box;$before=[ordered]@{project=Get-Inventory $box;profile=Get-Inventory (Join-Path $HOME '.meecho')};$text=Get-Content $case -Raw;$prompt="$(Get-Section $text 'User request')`n`n允许读取范围：$(Get-Section $text 'Accessible files')";$events=Join-Path $dir 'events.jsonl';$stderr=Join-Path $dir 'stderr.log';$final=Join-Path $dir 'final.md';$mode=if($id -in '02','07','08','09'){'workspace-write'}else{'read-only'};& codex exec --ephemeral --json --ignore-user-config --ignore-rules --sandbox $mode --skip-git-repo-check -C $box -o $final $prompt 1>$events 2>$stderr;$code=$LASTEXITCODE;if(-not(Test-Path $final)){Set-Content $final ''};$after=[ordered]@{project=Get-Inventory $box;profile=Get-Inventory (Join-Path $HOME '.meecho')};$assert=@([ordered]@{id="case-$id-observable-01";text=(Get-Section $text 'Observable assertions');status='needs-human-review'});$rubric=@(1..17|ForEach-Object{[ordered]@{id=$_;score='needs-human-review'}});Save-Json ([ordered]@{caseId=$id;status=$(if($code){'failed'}else{'completed-needs-human-review'});observableAssertions=$assert;rubric=$rubric;inventoryBefore=$before;inventoryAfter=$after;inventoryChanged=(@($before.project|ConvertTo-Json -Compress) -ne @($after.project|ConvertTo-Json -Compress));exitCode=$code}) (Join-Path $dir 'result.json');Add-Step "case-$id" "codex exec --ephemeral --json --ignore-user-config --ignore-rules --sandbox $mode" @(Get-Content $events -ErrorAction SilentlyContinue) @(Get-Content $stderr -ErrorAction SilentlyContinue) $code;$manifest.cases+=@([ordered]@{caseId=$id;status=$(if($code){'failed'}else{'completed-needs-human-review'});exitCode=$code});Save-Json $manifest $manifestPath}
+Finish $(if(@($manifest.cases|Where-Object exitCode -ne 0).Count){'failed'}else{'completed-needs-human-review'}) $(if(@($manifest.cases|Where-Object exitCode -ne 0).Count){1}else{0})
