@@ -68,6 +68,7 @@ if (Test-Path -LiteralPath $logsIgnore -PathType Leaf) {
 @(
     'evals/scripts/Invoke-Baseline.ps1',
     'evals/scripts/Invoke-EvalValidation.ps1',
+    'evals/scripts/EvalAudit.psm1',
     'evals/logs/README.md',
     'evals/results/baseline-summary.md'
 ) | ForEach-Object { [void](Get-RequiredFile $_) }

@@ -6,62 +6,150 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'EvalAudit.psm1') -Force
 
-function Get-UtcRunId { (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ') }
-function Get-GitCommit {
-    try { return ((& git -C $RepositoryRoot rev-parse HEAD 2>$null).Trim()) } catch { return 'unavailable' }
-}
 function Save-Json([object]$Value, [string]$Path) {
-    $Value | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $Path -Encoding utf8
+    $Value | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding utf8
 }
-function Write-StepLog([string]$Path, [string]$Action, [string[]]$Stdout, [string[]]$Stderr, [int]$ExitCode, [string]$Conclusion) {
-    @(
-        "utc_started=$((Get-Date).ToUniversalTime().ToString('o'))"
-        "action=$Action"
-        'stdout:'
-        $Stdout
-        'stderr:'
-        $Stderr
-        "exit_code=$ExitCode"
-        "conclusion=$Conclusion"
-        "utc_finished=$((Get-Date).ToUniversalTime().ToString('o'))"
-    ) | Set-Content -LiteralPath $Path -Encoding utf8
+
+function Get-GitCommit {
+    $result = Invoke-EvalProcess -FilePath 'git' -ArgumentList @('-C', $RepositoryRoot, 'rev-parse', 'HEAD')
+    if ($result.ExitCode -ne 0) { return 'unavailable' }
+    return (($result.Stdout -join "`n").Trim())
 }
+
+function ConvertFrom-ManifestUtc([string]$Value, [string]$FieldName) {
+    $parsed = [datetimeoffset]::MinValue
+    if ([string]::IsNullOrWhiteSpace($Value) -or -not [datetimeoffset]::TryParse(
+        $Value,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::RoundtripKind,
+        [ref]$parsed
+    ) -or $parsed.Offset -ne [timespan]::Zero) {
+        throw "Manifest $FieldName must be an ISO UTC timestamp."
+    }
+    return $parsed
+}
+
+function Get-RequiredProperty([object]$Value, [string]$Name, [string]$Context) {
+    $property = $Value.PSObject.Properties[$Name]
+    if ($null -eq $property -or $null -eq $property.Value) { throw "$Context is missing $Name." }
+    return $property.Value
+}
+
+function Resolve-RunFile([string]$RunDirectory, [string]$RelativePath) {
+    if ([string]::IsNullOrWhiteSpace($RelativePath) -or [System.IO.Path]::IsPathFullyQualified($RelativePath)) {
+        throw 'Run-relative path is invalid.'
+    }
+    $runRoot = [System.IO.Path]::GetFullPath($RunDirectory).TrimEnd('\', '/')
+    $fullPath = Resolve-EvalRepositoryPath -RepositoryRoot $RepositoryRoot -Path (Join-Path $runRoot $RelativePath)
+    if (-not $fullPath.StartsWith($runRoot + [System.IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Declared run file escapes the run directory.'
+    }
+    return $fullPath
+}
+
 function Test-CompleteRunLogs([string]$RunDirectory) {
-    $manifestPath = Join-Path $RunDirectory 'run-manifest.json'
+    $runRoot = Resolve-EvalRepositoryPath -RepositoryRoot $RepositoryRoot -Path $RunDirectory
+    $manifestPath = Join-Path $runRoot 'run-manifest.json'
+    $checksumPath = Join-Path $runRoot 'checksums.sha256'
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'Complete run is missing run-manifest.json.' }
-    if (-not (Test-Path -LiteralPath (Join-Path $RunDirectory 'checksums.sha256') -PathType Leaf)) { throw 'Complete run is missing checksums.sha256.' }
-    $completeManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    foreach($field in 'runId','startedAtUtc','endedAtUtc','executionUser','gitCommit','commandVersions','isolationPrecheck','status','exitCode','steps','cases') { if($null -eq $completeManifest.$field){throw "Manifest is missing $field."} }
-    if($completeManifest.runId -notmatch '^\d{8}T\d{6}Z$'){throw 'Manifest runId is invalid.'}
-    if($completeManifest.status -notin 'passed','failed','BLOCKED_NOT_RUN','completed-needs-human-review'){throw 'Manifest status is invalid.'}
+    if (-not (Test-Path -LiteralPath $checksumPath -PathType Leaf)) { throw 'Complete run is missing checksums.sha256.' }
+    $completeManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -DateKind String
+
+    foreach ($field in 'runId','startedAtUtc','endedAtUtc','executionUser','gitCommit','commandVersions','isolationPrecheck','status','exitCode','steps','cases') {
+        [void](Get-RequiredProperty -Value $completeManifest -Name $field -Context 'Manifest')
+    }
+    if ([string]$completeManifest.runId -notmatch '^\d{8}T\d{6}Z$') { throw 'Manifest runId is invalid.' }
+    $startedAt = ConvertFrom-ManifestUtc -Value ([string]$completeManifest.startedAtUtc) -FieldName 'startedAtUtc'
+    $endedAt = ConvertFrom-ManifestUtc -Value ([string]$completeManifest.endedAtUtc) -FieldName 'endedAtUtc'
+    if ($endedAt -lt $startedAt) { throw 'Manifest endedAtUtc precedes startedAtUtc.' }
+    if ([string]::IsNullOrWhiteSpace([string]$completeManifest.executionUser)) { throw 'Manifest executionUser is empty.' }
+    if ([string]::IsNullOrWhiteSpace([string]$completeManifest.gitCommit)) { throw 'Manifest gitCommit is empty.' }
+    if ($completeManifest.commandVersions -is [string] -or $completeManifest.isolationPrecheck -is [string]) { throw 'Manifest object fields are invalid.' }
+    if ([string]$completeManifest.isolationPrecheck.status -notin 'passed','failed','not-applicable') { throw 'Manifest isolationPrecheck status is invalid.' }
+    if ([string]$completeManifest.status -notin 'passed','failed','BLOCKED_NOT_RUN','completed-needs-human-review') { throw 'Manifest status is invalid.' }
+    $manifestExitCode = 0
+    if (-not [int]::TryParse([string]$completeManifest.exitCode, [ref]$manifestExitCode)) { throw 'Manifest exitCode is not numeric.' }
+    if (($manifestExitCode -eq 0) -ne ([string]$completeManifest.status -in 'passed','completed-needs-human-review')) {
+        throw 'Manifest status does not match exitCode.'
+    }
+
     if (@($completeManifest.steps).Count -eq 0) { throw 'Complete run manifest has no steps.' }
+    $stepNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $stepLogs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($step in @($completeManifest.steps)) {
-        if ([string]::IsNullOrWhiteSpace($step.log) -or -not (Test-Path -LiteralPath (Join-Path $RunDirectory $step.log) -PathType Leaf)) {
-            throw "Run step '$($step.name)' is missing its declared log."
+        foreach ($field in 'name','log','exitCode','status','conclusion') { [void](Get-RequiredProperty -Value $step -Name $field -Context 'Manifest step') }
+        if ([string]::IsNullOrWhiteSpace([string]$step.name) -or -not $stepNames.Add([string]$step.name)) { throw 'Manifest step name is empty or duplicated.' }
+        if (-not $stepLogs.Add([string]$step.log)) { throw 'Manifest step log is duplicated.' }
+        $declaredLog = Resolve-RunFile -RunDirectory $runRoot -RelativePath ([string]$step.log)
+        if (-not (Test-Path -LiteralPath $declaredLog -PathType Leaf)) { throw "Run step '$($step.name)' is missing its declared log." }
+        $logged = Read-EvalStepLog -Path $declaredLog
+        $declaredExitCode = 0
+        if (-not [int]::TryParse([string]$step.exitCode, [ref]$declaredExitCode)) { throw "Run step '$($step.name)' has a nonnumeric exitCode." }
+        if ([string]$step.status -notin 'passed','failed' -or [string]$step.conclusion -notin 'passed','failed') { throw "Run step '$($step.name)' has an invalid status or conclusion." }
+        if ($declaredExitCode -ne $logged.ExitCode -or [string]$step.status -ne $logged.Conclusion -or [string]$step.conclusion -ne $logged.Conclusion) {
+            throw "Run step '$($step.name)' manifest fields do not match its log."
         }
     }
-    if ((@($completeManifest.cases.caseId) | Sort-Object) -join ',' -ne '01,02,03,04,05,06,07,08,09') { throw 'Complete run must record exactly unique case IDs 01..09.' }
+
+    $caseIds = @($completeManifest.cases | ForEach-Object { [string]$_.caseId })
+    if (($caseIds | Sort-Object) -join ',' -ne '01,02,03,04,05,06,07,08,09') { throw 'Complete run must record exactly unique case IDs 01..09.' }
     foreach ($case in @($completeManifest.cases)) {
-        $caseDirectory = Join-Path $RunDirectory "cases/$($case.caseId)"
-        @('events.jsonl', 'stderr.log', 'final.md', 'result.json') | ForEach-Object {
-            if (-not (Test-Path -LiteralPath (Join-Path $caseDirectory $_) -PathType Leaf)) { throw "Case $($case.caseId) is missing $_." }
+        foreach ($field in 'caseId','status','exitCode') { [void](Get-RequiredProperty -Value $case -Name $field -Context 'Manifest case') }
+        $caseId = [string]$case.caseId
+        $caseExitCode = 0
+        if (-not [int]::TryParse([string]$case.exitCode, [ref]$caseExitCode)) { throw "Case $caseId exitCode is not numeric." }
+        if ([string]$case.status -notin 'failed','completed-needs-human-review') { throw "Case $caseId status is invalid." }
+        if (($caseExitCode -eq 0) -ne ([string]$case.status -eq 'completed-needs-human-review')) { throw "Case $caseId status does not match exitCode." }
+        $caseDirectory = Join-Path $runRoot "cases/$caseId"
+        foreach ($name in 'events.jsonl','stderr.log','final.md','result.json') {
+            if (-not (Test-Path -LiteralPath (Join-Path $caseDirectory $name) -PathType Leaf)) { throw "Case $caseId is missing $name." }
         }
         $result = Get-Content -LiteralPath (Join-Path $caseDirectory 'result.json') -Raw | ConvertFrom-Json
-        if(@($result.observableAssertions).Count -lt 1 -or @($result.observableAssertions|Where-Object{$_.id -notmatch '^case-\d{2}-observable-\d+$' -or $_.status -notin 'pass','fail','needs-human-review'}).Count){throw "Case $($case.caseId) has invalid observable assertions."}
-        if ((@($result.rubric.id)|Sort-Object) -join ',' -ne '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17' -or @($result.rubric|Where-Object{$_.score -notin 0,1,'needs-human-review'}).Count) { throw "Case $($case.caseId) has invalid rubric results." }
+        if ([string]$result.caseId -ne $caseId) { throw "Case $caseId result has a mismatched caseId." }
+        $assertions = @($result.observableAssertions)
+        if ($assertions.Count -lt 1) { throw "Case $caseId has no observable assertions." }
+        $assertionIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($assertion in $assertions) {
+            if ([string]$assertion.id -notmatch "^case-$caseId-observable-\d+$" -or
+                [string]$assertion.status -notin 'pass','fail','needs-human-review' -or
+                -not $assertionIds.Add([string]$assertion.id)) { throw "Case $caseId has invalid observable assertions." }
+        }
+        $rubricIds = @($result.rubric | ForEach-Object { [int]$_.id })
+        if (($rubricIds | Sort-Object) -join ',' -ne '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17' -or
+            @($result.rubric | Where-Object { $_.score -notin 0,1,'needs-human-review' }).Count -ne 0) {
+            throw "Case $caseId has invalid rubric results."
+        }
     }
-    $checksumLines=Get-Content -LiteralPath (Join-Path $RunDirectory 'checksums.sha256');if($checksumLines.Count -lt 1){throw 'Checksum file is empty.'};foreach($line in $checksumLines){if($line -notmatch '^([a-f0-9]{64})\s\s(.+)$'){throw 'Checksum format is invalid.'};$path=Join-Path $RepositoryRoot $Matches[2];if(-not(Test-Path $path)){throw 'Checksum path is not covered by repository.'};if((Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Matches[1]){throw 'Checksum does not match file.'}}
+
+    $expectedFiles = @(Get-EvalChecksumExpectedFiles -RepositoryRoot $RepositoryRoot -RunDirectory $runRoot)
+    $expected = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($file in $expectedFiles) { [void]$expected.Add([System.IO.Path]::GetFullPath($file.FullName)) }
+    $checksumLines = @(Get-Content -LiteralPath $checksumPath)
+    if ($checksumLines.Count -eq 0) { throw 'Checksum file is empty.' }
+    $covered = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($line in $checksumLines) {
+        if ($line -notmatch '^([a-f0-9]{64})  (.+)$') { throw 'Checksum format is invalid.' }
+        $declaredHash = $Matches[1]
+        $relativePath = $Matches[2]
+        if ([System.IO.Path]::IsPathFullyQualified($relativePath)) { throw 'Checksum path must be repository-relative.' }
+        $fullPath = Resolve-EvalRepositoryPath -RepositoryRoot $RepositoryRoot -Path (Join-Path $RepositoryRoot $relativePath)
+        $canonicalRelative = [System.IO.Path]::GetRelativePath([System.IO.Path]::GetFullPath($RepositoryRoot), $fullPath) -replace '\\','/'
+        if ($canonicalRelative -cne $relativePath) { throw 'Checksum path is not canonically normalized.' }
+        if (-not $covered.Add($fullPath)) { throw 'Checksum path is duplicated.' }
+        if (-not $expected.Contains($fullPath)) { throw 'Checksum set contains an unexpected file.' }
+        if ((Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $declaredHash) { throw 'Checksum does not match file.' }
+    }
+    if ($covered.Count -ne $expected.Count) { throw 'Checksum set omits required files.' }
+    foreach ($file in $expected) { if (-not $covered.Contains($file)) { throw 'Checksum set omits required files.' } }
 }
 
-$runId = Get-UtcRunId
-$runDirectory = Join-Path $RepositoryRoot "evals/logs/$runId"
-if (Test-Path -LiteralPath $runDirectory) { throw "UTC run ID collision: $runId. Retry the command." }
-New-Item -ItemType Directory -Force -Path (Join-Path $runDirectory 'steps') | Out-Null
-$manifestPath = Join-Path $runDirectory 'run-manifest.json'
+$run = New-EvalRunDirectory -RepositoryRoot $RepositoryRoot
+$manifestPath = Join-Path $run.Path 'run-manifest.json'
 $manifest = [ordered]@{
-    runId = $runId
-    startedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+    runId = $run.Id
+    startedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
     endedAtUtc = $null
     executionUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     gitCommit = Get-GitCommit
@@ -70,43 +158,37 @@ $manifest = [ordered]@{
     status = 'running'
     exitCode = $null
     steps = @()
+    cases = @()
 }
 Save-Json $manifest $manifestPath
 
-$test = Join-Path $RepositoryRoot 'evals/tests/Test-EvalStructure.ps1'
-$output = @(& pwsh -NoProfile -File $test -RepositoryRoot $RepositoryRoot 2>&1 | ForEach-Object { $_.ToString() })
-$exitCode = $LASTEXITCODE
-$stderr = @($output | Where-Object { $_ -match '(^|\s)(Exception|Error|FAIL:)' })
-$stdout = @($output | Where-Object { $_ -notmatch '(^|\s)(Exception|Error|FAIL:)' })
-$conclusion = if ($exitCode -eq 0) { 'passed' } else { 'failed' }
-Write-StepLog (Join-Path $runDirectory 'steps/01-structure-validation.log') 'pwsh -NoProfile -File evals/tests/Test-EvalStructure.ps1' $stdout $stderr $exitCode $conclusion
-$manifest.steps = @([ordered]@{ name = 'structure-validation'; log = 'steps/01-structure-validation.log'; status = $conclusion; exitCode = $exitCode })
+$structure = Invoke-EvalProcess -FilePath (Join-Path $PSHOME 'pwsh.exe') -ArgumentList @(
+    '-NoProfile', '-File', (Join-Path $RepositoryRoot 'evals/tests/Test-EvalStructure.ps1'), '-RepositoryRoot', $RepositoryRoot
+)
+$structureConclusion = if ($structure.ExitCode -eq 0) { 'passed' } else { 'failed' }
+Write-EvalStepLog -Path (Join-Path $run.Path 'steps/01-structure-validation.log') -Action 'pwsh -NoProfile -File evals/tests/Test-EvalStructure.ps1' -Stdout $structure.Stdout -Stderr $structure.Stderr -ExitCode $structure.ExitCode -Conclusion $structureConclusion -StartedAtUtc $structure.StartedAtUtc -EndedAtUtc $structure.EndedAtUtc
+$manifest.steps = @([ordered]@{ name = 'structure-validation'; log = 'steps/01-structure-validation.log'; status = $structureConclusion; conclusion = $structureConclusion; exitCode = $structure.ExitCode })
+$exitCode = $structure.ExitCode
+
 if ($exitCode -eq 0 -and $VerifyRunDirectory) {
+    $verifyStart = [datetimeoffset]::UtcNow
     try {
         Test-CompleteRunLogs (Resolve-Path -LiteralPath $VerifyRunDirectory).Path
-        Write-StepLog (Join-Path $runDirectory 'steps/02-complete-run-log-contract.log') "Validate $VerifyRunDirectory" @('Complete run contains all declared step and case logs.') @() 0 'passed'
-        $manifest.steps += [ordered]@{ name = 'complete-run-log-contract'; log = 'steps/02-complete-run-log-contract.log'; status = 'passed'; exitCode = 0 }
+        $verifyEnd = [datetimeoffset]::UtcNow
+        Write-EvalStepLog -Path (Join-Path $run.Path 'steps/02-complete-run-log-contract.log') -Action "Validate $VerifyRunDirectory" -Stdout @('Complete run satisfies the strict manifest, step, case, and checksum contract.') -Stderr @() -ExitCode 0 -Conclusion 'passed' -StartedAtUtc $verifyStart -EndedAtUtc $verifyEnd
+        $manifest.steps += [ordered]@{ name = 'complete-run-log-contract'; log = 'steps/02-complete-run-log-contract.log'; status = 'passed'; conclusion = 'passed'; exitCode = 0 }
     } catch {
-        Write-StepLog (Join-Path $runDirectory 'steps/02-complete-run-log-contract.log') "Validate $VerifyRunDirectory" @() @($_.Exception.Message) 1 'failed'
-        $manifest.steps += [ordered]@{ name = 'complete-run-log-contract'; log = 'steps/02-complete-run-log-contract.log'; status = 'failed'; exitCode = 1 }
+        $verifyEnd = [datetimeoffset]::UtcNow
+        Write-EvalStepLog -Path (Join-Path $run.Path 'steps/02-complete-run-log-contract.log') -Action "Validate $VerifyRunDirectory" -Stdout @() -Stderr @($_.Exception.Message) -ExitCode 1 -Conclusion 'failed' -StartedAtUtc $verifyStart -EndedAtUtc $verifyEnd
+        $manifest.steps += [ordered]@{ name = 'complete-run-log-contract'; log = 'steps/02-complete-run-log-contract.log'; status = 'failed'; conclusion = 'failed'; exitCode = 1 }
         $exitCode = 1
     }
 }
+
 $manifest.status = if ($exitCode -eq 0) { 'passed' } else { 'failed' }
 $manifest.exitCode = $exitCode
-$manifest.endedAtUtc = (Get-Date).ToUniversalTime().ToString('o')
+$manifest.endedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
 Save-Json $manifest $manifestPath
-
-$checksumPaths = @(
-    Get-ChildItem -LiteralPath (Join-Path $RepositoryRoot 'evals/fixtures/synthetic-corpus') -Recurse -File
-    Get-ChildItem -LiteralPath (Join-Path $RepositoryRoot 'evals/cases') -File
-    Get-Item -LiteralPath (Join-Path $RepositoryRoot 'evals/rubric.md')
-    Get-ChildItem -LiteralPath $runDirectory -Recurse -File | Where-Object { $_.Name -ne 'checksums.sha256' }
-)
-$checksumPaths | Sort-Object FullName | ForEach-Object {
-    $relative = $_.FullName.Substring($RepositoryRoot.Length).TrimStart('\', '/') -replace '\\', '/'
-    "$(($_ | Get-FileHash -Algorithm SHA256).Hash.ToLowerInvariant())  $relative"
-} | Set-Content -LiteralPath (Join-Path $runDirectory 'checksums.sha256') -Encoding utf8
-
-Write-Output "VALIDATION_RUN_ID=$runId"
+Write-EvalChecksums -RepositoryRoot $RepositoryRoot -RunDirectory $run.Path
+Write-Output "VALIDATION_RUN_ID=$($run.Id)"
 exit $exitCode

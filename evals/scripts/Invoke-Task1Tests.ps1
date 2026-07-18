@@ -1,7 +1,75 @@
 [CmdletBinding()]
-param([string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path)
+param(
+    [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
+    [string[]]$TestFiles
+)
+
 Set-StrictMode -Version Latest
-$ErrorActionPreference='Stop'
-for($i=0;$i-lt 3;$i++){ $id=(Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ');$run=Join-Path $RepositoryRoot "evals/logs/$id";if(-not(Test-Path $run)){New-Item -ItemType Directory -Path (Join-Path $run 'steps') -Force|Out-Null;break};Start-Sleep 1 }
-if(-not $run){throw 'Unable to allocate test log run.'};$manifest=[ordered]@{runId=$id;startedAtUtc=(Get-Date).ToUniversalTime().ToString('o');endedAtUtc=$null;executionUser=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name;gitCommit=((&git -C $RepositoryRoot rev-parse HEAD 2>$null).Trim());commandVersions=@{powershell=$PSVersionTable.PSVersion.ToString()};isolationPrecheck=@{status='not-applicable'};status='running';exitCode=$null;steps=@()};$mp=Join-Path $run 'run-manifest.json'
-function Save{$manifest|ConvertTo-Json -Depth 8|Set-Content $mp -Encoding utf8};Save;$failed=0;foreach($test in 'Test-EvalStructure.ps1','Test-ReviewFixes.ps1','Test-RunLogContract.ps1','Test-BaselinePreflight.ps1','Test-CompleteRunValidation.ps1'){$out=@(& pwsh -NoProfile -File (Join-Path $RepositoryRoot "evals/tests/$test") -RepositoryRoot $RepositoryRoot 2>&1|ForEach-Object ToString);$code=$LASTEXITCODE;$log="steps/$test.log";@('stdout:')+@($out|Where-Object{$_-notmatch 'Error|Exception|FAIL:'})+@('stderr:')+@($out|Where-Object{$_-match 'Error|Exception|FAIL:'})+@("exit_code=$code")|Set-Content (Join-Path $run $log) -Encoding utf8;$manifest.steps+=@([ordered]@{name=$test;log=$log;exitCode=$code;status=$(if($code){'failed'}else{'passed'})});if($code){$failed++};Save};$manifest.status=$(if($failed){'failed'}else{'passed'});$manifest.exitCode=$(if($failed){1}else{0});$manifest.endedAtUtc=(Get-Date).ToUniversalTime().ToString('o');Save;$files=@(Get-ChildItem $run -Recurse -File|Where-Object Name -ne 'checksums.sha256');$files|ForEach-Object{"$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.FullName.Substring($RepositoryRoot.Length).TrimStart('\','/') -replace '\\','/')"}|Set-Content (Join-Path $run 'checksums.sha256') -Encoding utf8;exit $manifest.exitCode
+$ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'EvalAudit.psm1') -Force
+
+function Save-Manifest {
+    $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+}
+
+$run = New-EvalRunDirectory -RepositoryRoot $RepositoryRoot
+$git = Invoke-EvalProcess -FilePath 'git' -ArgumentList @('-C', $RepositoryRoot, 'rev-parse', 'HEAD')
+$gitCommit = if ($git.ExitCode -eq 0) { ($git.Stdout -join "`n").Trim() } else { 'unavailable' }
+$manifestPath = Join-Path $run.Path 'run-manifest.json'
+$manifest = [ordered]@{
+    runId = $run.Id
+    startedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
+    endedAtUtc = $null
+    executionUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    gitCommit = $gitCommit
+    commandVersions = [ordered]@{ powershell = $PSVersionTable.PSVersion.ToString() }
+    isolationPrecheck = [ordered]@{ status = 'not-applicable' }
+    status = 'running'
+    exitCode = $null
+    steps = @()
+    cases = @()
+}
+Save-Manifest
+
+if ($null -eq $TestFiles -or $TestFiles.Count -eq 0) {
+    $TestFiles = @(
+        'Test-EvalStructure.ps1',
+        'Test-ReviewFixes.ps1',
+        'Test-RunLogContract.ps1',
+        'Test-BaselinePreflight.ps1',
+        'Test-CompleteRunValidation.ps1',
+        'Test-AuditInfrastructure.ps1'
+    ) | ForEach-Object { Join-Path $RepositoryRoot "evals/tests/$_" }
+}
+
+$failed = 0
+$index = 0
+foreach ($testFile in $TestFiles) {
+    $index++
+    $resolvedTest = (Resolve-Path -LiteralPath $testFile).Path
+    $result = Invoke-EvalProcess -FilePath (Join-Path $PSHOME 'pwsh.exe') -ArgumentList @(
+        '-NoProfile', '-File', $resolvedTest, '-RepositoryRoot', $RepositoryRoot
+    )
+    $conclusion = if ($result.ExitCode -eq 0) { 'passed' } else { 'failed' }
+    $safeName = ([System.IO.Path]::GetFileNameWithoutExtension($resolvedTest) -replace '[^A-Za-z0-9._-]', '-')
+    $log = 'steps/{0:D2}-{1}.log' -f $index, $safeName
+    $action = "pwsh -NoProfile -File $([System.IO.Path]::GetFileName($resolvedTest)) -RepositoryRoot <repository-root>"
+    Write-EvalStepLog -Path (Join-Path $run.Path $log) -Action $action -Stdout $result.Stdout -Stderr $result.Stderr -ExitCode $result.ExitCode -Conclusion $conclusion -StartedAtUtc $result.StartedAtUtc -EndedAtUtc $result.EndedAtUtc
+    $manifest.steps += [ordered]@{
+        name = [System.IO.Path]::GetFileName($resolvedTest)
+        log = $log
+        exitCode = $result.ExitCode
+        status = $conclusion
+        conclusion = $conclusion
+    }
+    if ($result.ExitCode -ne 0) { $failed++ }
+    Save-Manifest
+}
+
+$manifest.status = if ($failed -eq 0) { 'passed' } else { 'failed' }
+$manifest.exitCode = if ($failed -eq 0) { 0 } else { 1 }
+$manifest.endedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
+Save-Manifest
+Write-EvalChecksums -RepositoryRoot $RepositoryRoot -RunDirectory $run.Path
+Write-Output "TASK1_TEST_RUN_ID=$($run.Id)"
+exit $manifest.exitCode
