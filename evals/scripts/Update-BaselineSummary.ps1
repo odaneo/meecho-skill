@@ -1,0 +1,4 @@
+[CmdletBinding()]
+param([Parameter(Mandatory)][string]$RunDirectory,[string]$RepositoryRoot=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path)
+Set-StrictMode -Version Latest;$ErrorActionPreference='Stop'
+$m=Get-Content (Join-Path $RunDirectory 'run-manifest.json') -Raw|ConvertFrom-Json;$relative=(Resolve-Path $RunDirectory).Path.Substring($RepositoryRoot.Length).TrimStart('\','/') -replace '\\','/';$rows=1..9|ForEach-Object{$id='{0:D2}'-f $_;$case=@($m.cases|Where-Object caseId -eq $id|Select-Object -First 1);$status=if($case){$case.status}else{'BLOCKED_NOT_RUN'};"| $id | ``$status`` | $(if($case){'See result.json'}else{'Not observed; isolation preflight failed'}) | ``$relative/`` |"};@('# No-Skill baseline summary','',"Status: ``$($m.status)``",'',"Run ID: ``$($m.runId)``",'', '| Case | Status | Failed items | Local log path |','| --- | --- | --- | --- |')+$rows|Set-Content (Join-Path $RepositoryRoot 'evals/results/baseline-summary.md') -Encoding utf8
