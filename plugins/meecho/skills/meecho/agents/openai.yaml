@@ -1,0 +1,7 @@
+interface:
+  display_name: "Meecho"
+  short_description: "显式建立、调用、更新、导出和管理本地私人写作声音档案"
+  default_prompt: "使用 $meecho:meecho 查看当前本地声音档案状态。"
+
+policy:
+  allow_implicit_invocation: false

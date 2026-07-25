@@ -13,6 +13,6 @@
     "developerName": "Meecho contributors",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "Show the status of my local Meecho voice profile."
+    "defaultPrompt": "使用 $meecho:meecho 查看当前本地声音档案状态。"
   }
 }
