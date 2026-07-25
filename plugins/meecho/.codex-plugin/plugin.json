@@ -1,0 +1,18 @@
+{
+  "name": "meecho",
+  "version": "0.1.0",
+  "description": "Local-first writing-voice profiles without model training",
+  "author": {
+    "name": "Meecho contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Meecho",
+    "shortDescription": "Use a private local writing-voice profile.",
+    "longDescription": "Meecho helps Codex build and use a private writing-voice profile while source documents stay outside the plugin.",
+    "developerName": "Meecho contributors",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Show the status of my local Meecho voice profile."
+  }
+}
