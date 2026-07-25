@@ -1,0 +1,7 @@
+{
+  "contains": [
+    "profile.required_file",
+    "manifest.schema",
+    "exemplar.category"
+  ]
+}

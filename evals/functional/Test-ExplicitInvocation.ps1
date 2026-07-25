@@ -117,7 +117,7 @@ Test-Fact 'implicit invocation is disabled' (
 ) 'policy.allow_implicit_invocation must be false.'
 
 $declaredOperations = @(
-    [regex]::Matches($skillText, '(?m)^- `(?<operation>[a-z]+)`:\s+\S.*$') |
+    [regex]::Matches($skillText, '(?m)^- `(?<operation>[a-z]+)`[:：]\s*\S.*$') |
         ForEach-Object { $_.Groups['operation'].Value }
 )
 $expectedOperations = @(

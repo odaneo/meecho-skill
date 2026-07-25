@@ -15,6 +15,12 @@ description: 管理和使用本地私人写作声音档案，支持 build、writ
 - 只有文件名、YAML 字段、`$meecho:meecho` 选择器和八个操作标识符可以
   保留英文。
 
+## 读取档案规范
+
+执行任何需要读取或修改声音档案的操作前，先读取
+[`references/profile-schema.md`](references/profile-schema.md)。严格使用其中的
+根目录、schema、档案文件、备份和删除规则；不得自行补充另一套档案结构。
+
 ## 严守边界
 
 - 仅在宿主明确激活本技能后继续。

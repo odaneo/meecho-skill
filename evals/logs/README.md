@@ -19,5 +19,13 @@
 - `green/skill-validator.txt` 和 `green/plugin-validator.txt`：两个官方校验器输出。
 - `green/result.json`：全部最终退出码和环境说明。
 
+任务 3 使用 `task3-<UTC 时间>/`，其中包含：
+
+- `red/profile-contract-test.txt`：档案规范和 fixtures 尚不存在时的预期失败。
+- `green/profile-contract-test.txt`：合法档案通过、非法档案被拒绝及私人数据边界检查。
+- `green/explicit-invocation-test.txt` 和 `green/plugin-structure-test.txt`：已有行为的回归测试。
+- `green/skill-validator.txt` 和 `green/plugin-validator.txt`：两个官方校验器输出。
+- `green/result.json`：全部最终退出码和最终状态。
+
 这些日志只记录客观检查结果，例如文件是否存在、JSON 是否合法、目录边界
 是否满足。它们不让模型评价文字风格，也不产生相似度分数。

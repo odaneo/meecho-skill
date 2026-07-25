@@ -1,0 +1,10 @@
+{
+  "schema": 2,
+  "profile_id": "high-school",
+  "created_at": "2026-07-26T00:00:00Z",
+  "updated_at": "2026-07-26T00:00:00Z",
+  "source_counts": {
+    "historical_works": 1,
+    "current_context_works": 0
+  }
+}
