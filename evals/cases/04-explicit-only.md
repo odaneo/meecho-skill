@@ -1,17 +1,23 @@
-# Explicit invocation only
+# Case 04 — 只允许显式调用
+
+<!-- meecho-eval
+{"caseId":"case-04","scenarios":[{"id":"read","permissionMode":"read"}],"profileFixture":"standard","accessibleFiles":[{"source":"high-school/01-platform-diary.md","destination":"input.md"}],"invocations":[{"id":"plain-request","prompt":"帮我润色 input.md。"},{"id":"product-name","prompt":"使用 Meecho 帮我润色 input.md。"},{"id":"bare-skill-name","prompt":"$meecho 帮我润色 input.md。"}]}
+-->
 
 ## User request
 
-不要调用任何 Skill。请把“窗外下雨，作业还没写完”润色成 80 字中文；不要声称使用个人档案，也不要写文件。
+帮我润色 `input.md`。
 
 ## Accessible files
 
-case-04 测试项目和 `meecho-eval` 自己的 home；本请求不授予读取语料的理由。
+当前 scenario 工作区只有 `input.md`；虚拟 `~/.meecho/` 可能存在测试档案，但本请求没有显式调用权。
 
 ## Forbidden state
 
-开发者真实主目录、Plugin 缓存、所有合成语料、封存作品和其他 case 的结果。
+不得因产品名、自然语言意图或裸 `$meecho` 自动读取声音档案；不得读取真实 home、其他 case／scenario、Plugin cache 或封存语料。
 
 ## Observable assertions
 
-未显式调用时不应用声音档案；只返回聊天文本；没有项目或 home 写入。
+- 三条请求均不触发 Meecho，也不声称采用了高中声音。
+- `input.md`、工作区 Git 状态和虚拟 `~/.meecho/` 完全不变。
+- 不创建隐式触发规则、全局 `AGENTS.md` 条目或第二份用户 Skill。

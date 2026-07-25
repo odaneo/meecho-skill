@@ -1,75 +1,141 @@
 [CmdletBinding()]
 param(
-    [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
-    [string[]]$TestFiles
+    [ValidatePattern('^\d{8}T\d{9}Z-[0-9a-f]{8}$')]
+    [string] $RunId
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'EvalAudit.psm1') -Force
 
-function Save-Manifest {
-    $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+if (-not $RunId) {
+    $RunId = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfffZ') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
 }
 
-$run = New-EvalRunDirectory -RepositoryRoot $RepositoryRoot
-$git = Invoke-EvalProcess -FilePath 'git' -ArgumentList @('-C', $RepositoryRoot, 'rev-parse', 'HEAD')
-$gitCommit = if ($git.ExitCode -eq 0) { ($git.Stdout -join "`n").Trim() } else { 'unavailable' }
-$manifestPath = Join-Path $run.Path 'run-manifest.json'
-$manifest = [ordered]@{
-    runId = $run.Id
-    startedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
-    endedAtUtc = $null
-    executionUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-    gitCommit = $gitCommit
-    commandVersions = [ordered]@{ powershell = $PSVersionTable.PSVersion.ToString() }
-    isolationPrecheck = [ordered]@{ status = 'not-applicable' }
-    status = 'running'
-    exitCode = $null
-    steps = @()
-    cases = @()
-}
-Save-Manifest
-
-if ($null -eq $TestFiles -or $TestFiles.Count -eq 0) {
-    $TestFiles = @(
-        'Test-EvalStructure.ps1',
-        'Test-ReviewFixes.ps1',
-        'Test-RunLogContract.ps1',
-        'Test-BaselinePreflight.ps1',
-        'Test-CompleteRunValidation.ps1',
-        'Test-AuditInfrastructure.ps1'
-    ) | ForEach-Object { Join-Path $RepositoryRoot "evals/tests/$_" }
-}
-
-$failed = 0
-$index = 0
-foreach ($testFile in $TestFiles) {
-    $index++
-    $resolvedTest = (Resolve-Path -LiteralPath $testFile).Path
-    $result = Invoke-EvalProcess -FilePath (Join-Path $PSHOME 'pwsh.exe') -ArgumentList @(
-        '-NoProfile', '-File', $resolvedTest, '-RepositoryRoot', $RepositoryRoot
+$logRoot = Join-Path $repoRoot "evals/logs/$RunId/task1-tests"
+$lockRoot = Join-Path $repoRoot 'evals/logs/.locks'
+[void][IO.Directory]::CreateDirectory($lockRoot)
+$lockPath = Join-Path $lockRoot "$RunId.task1-tests.lock"
+$lockStream = $null
+try {
+    $lockStream = [IO.File]::Open(
+        $lockPath,
+        [IO.FileMode]::CreateNew,
+        [IO.FileAccess]::Write,
+        [IO.FileShare]::None
     )
-    $conclusion = if ($result.ExitCode -eq 0) { 'passed' } else { 'failed' }
-    $safeName = ([System.IO.Path]::GetFileNameWithoutExtension($resolvedTest) -replace '[^A-Za-z0-9._-]', '-')
-    $log = 'steps/{0:D2}-{1}.log' -f $index, $safeName
-    $action = "pwsh -NoProfile -File $([System.IO.Path]::GetFileName($resolvedTest)) -RepositoryRoot <repository-root>"
-    Write-EvalStepLog -Path (Join-Path $run.Path $log) -Action $action -Stdout $result.Stdout -Stderr $result.Stderr -ExitCode $result.ExitCode -Conclusion $conclusion -StartedAtUtc $result.StartedAtUtc -EndedAtUtc $result.EndedAtUtc
-    $manifest.steps += [ordered]@{
-        name = [System.IO.Path]::GetFileName($resolvedTest)
-        log = $log
-        exitCode = $result.ExitCode
-        status = $conclusion
-        conclusion = $conclusion
+    if (Test-Path -LiteralPath $logRoot) {
+        throw 'TASK1_TEST_RUN_ALREADY_EXISTS'
     }
-    if ($result.ExitCode -ne 0) { $failed++ }
-    Save-Manifest
+    [void][IO.Directory]::CreateDirectory($logRoot)
+    $lockBytes = [Text.Encoding]::UTF8.GetBytes($RunId)
+    $lockStream.Write($lockBytes, 0, $lockBytes.Length)
+    $lockStream.Flush($true)
+}
+finally {
+    if ($null -ne $lockStream) {
+        $lockStream.Dispose()
+    }
 }
 
-$manifest.status = if ($failed -eq 0) { 'passed' } else { 'failed' }
-$manifest.exitCode = if ($failed -eq 0) { 0 } else { 1 }
-$manifest.endedAtUtc = [datetimeoffset]::UtcNow.ToString('o')
-Save-Manifest
-Write-EvalChecksums -RepositoryRoot $RepositoryRoot -RunDirectory $run.Path
-Write-Output "TASK1_TEST_RUN_ID=$($run.Id)"
-exit $manifest.exitCode
+$testNames = @(
+    'Test-EvalCapsule.ps1',
+    'Test-CaseIsolation.ps1',
+    'Test-AuditInfrastructure.ps1',
+    'Test-PairedEvaluation.ps1',
+    'Test-BaselinePreflight.ps1',
+    'Test-CompleteRunValidation.ps1',
+    'Test-RunLogContract.ps1',
+    'Test-EvalStructure.ps1',
+    'Test-ReviewFixes.ps1'
+)
+
+$results = [Collections.Generic.List[object]]::new()
+$testTimeoutSeconds = 300
+foreach ($testName in $testNames) {
+    $testPath = Join-Path $repoRoot "evals/tests/$testName"
+    $stepName = [IO.Path]::GetFileNameWithoutExtension($testName)
+    $stdoutPath = Join-Path $logRoot "$stepName.stdout.log"
+    $stderrPath = Join-Path $logRoot "$stepName.stderr.log"
+    $recordPath = Join-Path $logRoot "$stepName.result.json"
+
+    $startedAt = (Get-Date).ToUniversalTime()
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = Join-Path $PSHOME 'pwsh.exe'
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', $testPath)) {
+        [void] $startInfo.ArgumentList.Add($argument)
+    }
+
+    try {
+        $process = [Diagnostics.Process]::Start($startInfo)
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $timedOut = -not $process.WaitForExit($testTimeoutSeconds * 1000)
+        if ($timedOut) {
+            $process.Kill($true)
+            $process.WaitForExit()
+        }
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        if ($timedOut) {
+            $stderr = ($stderr.TrimEnd() + "`nTest timed out after $testTimeoutSeconds seconds.").TrimStart()
+            $exitCode = 124
+        }
+        else {
+            $exitCode = $process.ExitCode
+        }
+        $process.Dispose()
+    }
+    catch {
+        $stdout = ''
+        $stderr = $_.Exception.ToString()
+        $exitCode = 255
+        $timedOut = $false
+    }
+    $endedAt = (Get-Date).ToUniversalTime()
+    Set-Content -LiteralPath $stdoutPath -Value $stdout -Encoding UTF8
+    Set-Content -LiteralPath $stderrPath -Value $stderr -Encoding UTF8
+
+    $record = [ordered]@{
+        test = $testName
+        exitCode = $exitCode
+        timedOut = $timedOut
+        startedAtUtc = $startedAt.ToString('o')
+        endedAtUtc = $endedAt.ToString('o')
+        stdoutPath = (Resolve-Path -Relative $stdoutPath).Replace('\', '/')
+        stderrPath = (Resolve-Path -Relative $stderrPath).Replace('\', '/')
+        stdoutSha256 = (Get-FileHash -LiteralPath $stdoutPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        stderrSha256 = (Get-FileHash -LiteralPath $stderrPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        passed = ($exitCode -eq 0)
+    }
+    $record | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $recordPath -Encoding UTF8
+    $results.Add([pscustomobject]$record)
+}
+
+$manifestPath = Join-Path $logRoot 'run-manifest.json'
+$manifest = [ordered]@{
+    schemaVersion = 1
+    kind = 'meecho-task1-test-run'
+    runId = $RunId
+    status = if (@($results | Where-Object { -not $_.passed }).Count -eq 0) { 'PASS' } else { 'FAIL' }
+    testNames = $testNames
+    passed = @($results | Where-Object passed).Count
+    failed = @($results | Where-Object { -not $_.passed }).Count
+    results = @($results)
+}
+$manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+
+[ordered]@{
+    RunId = $RunId
+    Status = $manifest.status
+    Passed = $manifest.passed
+    Failed = $manifest.failed
+    ManifestPath = $manifestPath
+} | ConvertTo-Json -Compress
+
+if ($manifest.status -ne 'PASS') {
+    exit 1
+}

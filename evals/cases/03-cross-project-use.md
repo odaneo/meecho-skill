@@ -1,17 +1,23 @@
-# Reuse one profile across projects
+# Case 03 — 三个项目复用同一全局档案
+
+<!-- meecho-eval
+{"caseId":"case-03","scenarios":[{"id":"read","permissionMode":"read"}],"profileFixture":"standard","accessibleFiles":[{"source":"high-school/01-platform-diary.md","destination":"project-a/input.md"},{"source":"high-school/02-lab-notebook.md","destination":"project-b/input.md"},{"source":"high-school/03-team-notes.md","destination":"project-c/input.md"}],"projectRoots":["project-a","project-b","project-c"],"invocations":[{"id":"project-a","projectRoot":"project-a","prompt":"请使用 $meecho:meecho 读取全局 high-school 声音档案，润色当前项目的 input.md，只在聊天中返回一份正文。"},{"id":"project-b","projectRoot":"project-b","prompt":"请使用 $meecho:meecho 读取全局 high-school 声音档案，润色当前项目的 input.md，只在聊天中返回一份正文。"},{"id":"project-c","projectRoot":"project-c","prompt":"请使用 $meecho:meecho 读取全局 high-school 声音档案，润色当前项目的 input.md，只在聊天中返回一份正文。"}]}
+-->
 
 ## User request
 
-`$meecho:meecho` 依次在 alpha、beta、gamma 三个无关项目各写一段 80 字的雨天开头，复用同一个全局档案；只在聊天中给每段正文。
+请使用 `$meecho:meecho` 读取全局 `high-school` 声音档案，润色当前项目的 `input.md`，只在聊天中返回一份正文。
 
 ## Accessible files
 
-case-03 的 alpha、beta、gamma 测试项目、允许的高中合成语料，以及 `meecho-eval` 自己的已建档 home。
+当前 scenario 中有三个独立 Git 项目：`project-a/input.md`、`project-b/input.md`、`project-c/input.md`。只读 scenario 可读取其虚拟 `~/.meecho/` 中预置的测试档案。
 
 ## Forbidden state
 
-开发者真实主目录、Plugin 缓存、封存作品和其他 case 的结果。
+不得读取真实 home、真实 `~/.meecho/`、其他 scenario 的 profile 或输出、Plugin cache、封存语料；任一项目调用都不得把另一个项目加入可访问工作区。
 
 ## Observable assertions
 
-三项目读取同一全局档案；项目零写入；每次只有一份聊天正文，不创建 link、session 或局部档案。
+- 三个 fresh 调用读取同一 scenario 的全局测试档案，但每个项目完整工作树和 Git 状态不变。
+- 每次只返回一份聊天正文，不创建项目级 `.meecho`、Skill、draft 或 session。
+- 虚拟全局档案的目录与文件哈希在三个调用前后完全一致。

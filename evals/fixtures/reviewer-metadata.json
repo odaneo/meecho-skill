@@ -1,8 +1,9 @@
 {
-  "highSchool": {
-    "stableSignals": ["细部先行", "保留不确定", "克制的比喻"],
-    "topicOnlyTokens": ["月台", "弹簧秤", "比分"]
-  },
-  "sealedLeakCanary": "雾灯替我保管第七把钥匙",
-  "accessPolicy": "reviewer-only; never stage this file for a tested agent"
+  "schemaVersion": 1,
+  "sealedFiles": [
+    {
+      "path": "evals/fixtures/synthetic-corpus/sealed/01-private-draft.md",
+      "sha256": "d05d2b0d79db42f15cb5aa4368ecceae05e45df0b0b122fb9d6ee547fd86d14e"
+    }
+  ]
 }

@@ -1,14 +1,31 @@
 # Local evaluation logs
 
-Each script invocation creates `evals/logs/<UTC_RUN_ID>/`, where the ID is `yyyyMMddTHHmmssZ`.
-Run directories are intentionally ignored: they may contain raw Codex JSONL and stderr. Do not commit or manually clean them unless the user explicitly asks.
+Every harness invocation creates an ignored directory named
+`evals/logs/<yyyyMMddTHHmmssfffZ-8hex>/`.
 
-Every run records a manifest, per-step logs, checksums, and (after a successful isolation preflight) per-case event, stderr, final-answer, and scoring files. Logs never include authentication tokens, a complete process environment, or developer-home content.
+Behavior runs use the same `mode/case/scenario` hierarchy as the isolated
+capsule:
 
-Before a formal run, an administrator must provision `evals/sandboxes/isolation-config.json` locally (it is ignored). It contains a developer profile SID and a relative path to an existing developer-home canary that the `meecho-eval` account is denied from enumerating:
-
-```json
-{"developerProfileSid":"S-1-5-21-...","developerHomeCanary":"Documents\\meecho-isolation-canary"}
+```text
+<run-id>/<mode>/<case>/<scenario>/
 ```
 
-Do not create the account, canary, or ACLs from this repository. Copy the formal test bundle to a directory accessible to `meecho-eval` that is outside the developer home, then run the baseline there. The runner blocks if the repository is inside that home, the canary is readable, missing, or returns an ambiguous error.
+Each executed step records separate stdout and stderr files, its exit code,
+UTC timestamps, a JSON record, and SHA-256 checksums. A run manifest records
+only the names of effective environment variables; it never records their
+values. Authentication files and authentication contents are never copied,
+hashed, or logged.
+
+Raw JSONL, stderr, final responses, local paths, and temporary scoring records
+stay in this ignored directory. Git tracks only this README, `.gitignore`, and
+the redacted summary in `evals/results/`.
+
+The supported non-complete statuses are:
+
+- `AUTH_REQUIRED`: the isolated Codex home has no usable file-backed login.
+- `BLOCKED_NOT_RUN`: a path, capability, configuration, launch, or canary check
+  failed before behavior cases were allowed to run.
+- `INVALID_COMPARISON`: a paired control/treatment run completed with unequal
+  comparison inputs.
+
+Do not delete historical run directories unless their owner explicitly asks.

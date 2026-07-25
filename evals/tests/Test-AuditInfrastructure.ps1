@@ -1,188 +1,357 @@
-[CmdletBinding()]
-param(
-    [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-)
-
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$modulePath = Join-Path $RepositoryRoot 'evals/scripts/EvalAudit.psm1'
-if (-not (Test-Path -LiteralPath $modulePath -PathType Leaf)) {
-    throw 'The shared evaluation audit module is missing.'
-}
-Import-Module $modulePath -Force
+Import-Module (Join-Path $PSScriptRoot 'TestSupport.psm1') -Force
+$repoRoot = Get-MeechoRepoRoot
+Import-Module (Join-Path $repoRoot 'evals/scripts/EvalAudit.psm1') -Force
 
-function Assert-Condition {
-    param([bool]$Condition, [string]$Message)
-    if (-not $Condition) { throw $Message }
-}
-
-function Test-CollisionAllocation {
-    param([string]$Consumer)
-
-    $root = Join-Path ([System.IO.Path]::GetTempPath()) "meecho-audit-$Consumer-$([guid]::NewGuid().ToString('N'))"
-    try {
-        New-Item -ItemType Directory -Force -Path (Join-Path $root 'evals/logs') | Out-Null
-        $collisionUtc = [datetime]::SpecifyKind([datetime]'2099-01-01T00:00:00', [DateTimeKind]::Utc)
-        $collisionId = $collisionUtc.ToString('yyyyMMddTHHmmssZ')
-        $oldRun = Join-Path $root "evals/logs/$collisionId"
-        New-Item -ItemType Directory -Path $oldRun | Out-Null
-        $sentinel = Join-Path $oldRun 'sentinel.txt'
-        Set-Content -LiteralPath $sentinel -Value "untouched-$Consumer" -Encoding utf8
-        $beforeHash = (Get-FileHash -LiteralPath $sentinel -Algorithm SHA256).Hash
-
-        $times = [System.Collections.Generic.Queue[datetime]]::new()
-        $times.Enqueue($collisionUtc)
-        $times.Enqueue($collisionUtc.AddSeconds(1))
-        $waited = [System.Collections.Generic.List[string]]::new()
-        $nowProvider = { $times.Dequeue() }.GetNewClosure()
-        $waitAction = { param([string]$RunId) $waited.Add($RunId) }.GetNewClosure()
-
-        $allocated = New-EvalRunDirectory -RepositoryRoot $root -UtcNowProvider $nowProvider -WaitAction $waitAction
-        Assert-Condition ($allocated.Id -eq '20990101T000001Z') "$Consumer reused the colliding run ID."
-        Assert-Condition ($waited.Count -eq 1 -and $waited[0] -eq $collisionId) "$Consumer did not wait after the same-second collision."
-        Assert-Condition ((Get-FileHash -LiteralPath $sentinel -Algorithm SHA256).Hash -eq $beforeHash) "$Consumer modified the old run directory."
-        Assert-Condition (@(Get-ChildItem -LiteralPath $oldRun -Force).Count -eq 1) "$Consumer polluted the old run directory."
-        Assert-Condition (Test-Path -LiteralPath (Join-Path $allocated.Path 'steps') -PathType Container) "$Consumer did not return a newly initialized run directory."
-    } finally {
-        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
-
-foreach ($consumer in 'Invoke-Baseline', 'Invoke-EvalValidation', 'Invoke-Task1Tests') {
-    Test-CollisionAllocation -Consumer $consumer
-}
-
-$childPowerShell = Join-Path $PSHOME 'pwsh.exe'
-$split = Invoke-EvalProcess -FilePath $childPowerShell -ArgumentList @(
-    '-NoProfile',
-    '-Command',
-    "[Console]::Out.WriteLine('AUDIT-STDOUT'); [Console]::Error.WriteLine('AUDIT-STDERR')"
+$allowedEnvironmentNames = @(
+    'SystemRoot',
+    'WINDIR',
+    'COMSPEC',
+    'PATHEXT',
+    'PATH',
+    'TEMP',
+    'TMP',
+    'LOCALAPPDATA',
+    'APPDATA',
+    'ProgramData',
+    'ProgramFiles',
+    'ProgramFiles(x86)',
+    'CommonProgramFiles',
+    'CommonProgramFiles(x86)',
+    'USERNAME',
+    'USERDOMAIN',
+    'USERPROFILE',
+    'HOME',
+    'CODEX_HOME',
+    'CODEX_SQLITE_HOME'
 )
-Assert-Condition ($split.ExitCode -eq 0) 'Deterministic child PowerShell failed.'
-Assert-Condition (($split.Stdout -join "`n") -match '^AUDIT-STDOUT\s*$') 'stdout was not captured from the real stdout stream.'
-Assert-Condition (($split.Stderr -join "`n") -match '^AUDIT-STDERR\s*$') 'stderr was not captured from the real stderr stream.'
-Assert-Condition (($split.Stdout -join "`n") -notmatch 'AUDIT-STDERR') 'stderr leaked into stdout.'
-Assert-Condition (($split.Stderr -join "`n") -notmatch 'AUDIT-STDOUT') 'stdout leaked into stderr.'
-Assert-Condition ($split.StartedAtUtc -le $split.EndedAtUtc) 'Process timestamps are not ordered.'
 
-function Write-JsonFile {
-    param([object]$Value, [string]$Path)
-    $Value | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $Path -Encoding utf8
+$testRoot = New-MeechoTestRoot
+$previousSecrets = [ordered]@{
+    OPENAI_API_KEY = $env:OPENAI_API_KEY
+    MEECHO_TOKEN = $env:MEECHO_TOKEN
 }
+$secretMarker = 'secret-' + [guid]::NewGuid().ToString('N')
+try {
+    $env:OPENAI_API_KEY = $secretMarker + '-openai'
+    $env:MEECHO_TOKEN = $secretMarker + '-token'
 
-function New-ValidRunFixture {
-    $fixture = Join-Path $RepositoryRoot "evals/logs/fixture-$([guid]::NewGuid().ToString('N'))"
-    New-Item -ItemType Directory -Force -Path (Join-Path $fixture 'steps'), (Join-Path $fixture 'cases') | Out-Null
-    $steps = @()
-    $cases = @()
-    $started = [datetimeoffset]'2099-01-01T00:00:00Z'
-    $ended = [datetimeoffset]'2099-01-01T00:00:01Z'
-
-    foreach ($number in 1..9) {
-        $id = '{0:D2}' -f $number
-        $stepLog = "steps/case-$id.log"
-        Write-EvalStepLog -Path (Join-Path $fixture $stepLog) -Action "fixture case $id" -Stdout @("case-$id-output") -Stderr @() -ExitCode 0 -Conclusion 'passed' -StartedAtUtc $started -EndedAtUtc $ended
-        $steps += [ordered]@{ name = "case-$id"; log = $stepLog; exitCode = 0; status = 'passed'; conclusion = 'passed' }
-        $cases += [ordered]@{ caseId = $id; status = 'completed-needs-human-review'; exitCode = 0 }
-        $caseDirectory = Join-Path $fixture "cases/$id"
-        New-Item -ItemType Directory -Force -Path $caseDirectory | Out-Null
-        Set-Content -LiteralPath (Join-Path $caseDirectory 'events.jsonl') -Value '{}' -Encoding utf8
-        Set-Content -LiteralPath (Join-Path $caseDirectory 'stderr.log') -Value '' -Encoding utf8
-        Set-Content -LiteralPath (Join-Path $caseDirectory 'final.md') -Value 'fixture final' -Encoding utf8
-        Write-JsonFile -Path (Join-Path $caseDirectory 'result.json') -Value ([ordered]@{
-            caseId = $id
-            status = 'completed-needs-human-review'
-            exitCode = 0
-            observableAssertions = @([ordered]@{ id = "case-$id-observable-01"; text = 'fixture assertion'; status = 'needs-human-review' })
-            rubric = @(1..17 | ForEach-Object { [ordered]@{ id = $_; score = 'needs-human-review' } })
-        })
+    $allowedEnvironment = [ordered]@{
+        SystemRoot = $env:SystemRoot
+        WINDIR = $env:WINDIR
+        COMSPEC = $env:COMSPEC
+        PATHEXT = $env:PATHEXT
+        PATH = $env:PATH
+        TEMP = (Join-Path $testRoot 'temp')
+        TMP = (Join-Path $testRoot 'temp')
+        LOCALAPPDATA = (Join-Path $testRoot 'local')
+        APPDATA = (Join-Path $testRoot 'roaming')
+        USERPROFILE = (Join-Path $testRoot 'home')
+        HOME = (Join-Path $testRoot 'home')
+        CODEX_HOME = (Join-Path $testRoot 'codex-home')
+        CODEX_SQLITE_HOME = (Join-Path $testRoot 'state')
+    }
+    foreach ($path in @(
+        $allowedEnvironment.TEMP,
+        $allowedEnvironment.LOCALAPPDATA,
+        $allowedEnvironment.APPDATA,
+        $allowedEnvironment.USERPROFILE,
+        $allowedEnvironment.CODEX_HOME,
+        $allowedEnvironment.CODEX_SQLITE_HOME
+    ) | Sort-Object -Unique) {
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
     }
 
-    Write-JsonFile -Path (Join-Path $fixture 'run-manifest.json') -Value ([ordered]@{
-        runId = '20990101T000000Z'
-        startedAtUtc = $started.ToString('o')
-        endedAtUtc = $ended.ToString('o')
-        executionUser = 'fixture-user'
-        gitCommit = 'fixture-commit'
-        commandVersions = [ordered]@{ powershell = 'fixture' }
-        isolationPrecheck = [ordered]@{ status = 'passed'; failures = @() }
-        status = 'completed-needs-human-review'
-        exitCode = 0
-        steps = $steps
-        cases = $cases
-    })
-    Write-EvalChecksums -RepositoryRoot $RepositoryRoot -RunDirectory $fixture
-    return $fixture
-}
+    $stepRoot = Join-Path $testRoot 'logs'
+    $command = @'
+[Console]::Out.WriteLine((Get-ChildItem Env: | ForEach-Object Name | Sort-Object) -join ',')
+[Console]::Error.WriteLine('stderr-marker')
+exit 7
+'@
+    $result = Invoke-MeechoAuditedProcess `
+        -FilePath (Join-Path $PSHOME 'pwsh.exe') `
+        -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-Command', $command) `
+        -Environment $allowedEnvironment `
+        -StepLogRoot $stepRoot `
+        -StepName 'environment-probe'
 
-function Invoke-Validator {
-    param([string]$Fixture, [bool]$ShouldPass, [string]$Scenario)
+    Assert-Equal 7 $result.ExitCode 'Real child exit code must propagate.'
+    Assert-True (Test-Path -LiteralPath $result.StdoutPath -PathType Leaf) 'stdout log missing.'
+    Assert-True (Test-Path -LiteralPath $result.StderrPath -PathType Leaf) 'stderr log missing.'
+    Assert-True ((Get-Content -LiteralPath $result.StderrPath -Raw -Encoding UTF8).Contains('stderr-marker')) 'stderr was not captured separately.'
+    Assert-False ((Get-Content -LiteralPath $result.StdoutPath -Raw -Encoding UTF8).Contains('stderr-marker')) 'stderr leaked into stdout.'
 
-    $validator = Join-Path $RepositoryRoot 'evals/scripts/Invoke-EvalValidation.ps1'
-    $result = Invoke-EvalProcess -FilePath $childPowerShell -ArgumentList @(
-        '-NoProfile', '-File', $validator, '-RepositoryRoot', $RepositoryRoot, '-VerifyRunDirectory', $Fixture
+    $childNames = @(
+        (Get-Content -LiteralPath $result.StdoutPath -Raw -Encoding UTF8).Trim() -split ','
     )
-    if ($ShouldPass) {
-        Assert-Condition ($result.ExitCode -eq 0) "$Scenario was rejected: $($result.Stderr -join ' | ')"
-    } else {
-        Assert-Condition ($result.ExitCode -ne 0) "$Scenario was accepted."
+    foreach ($required in $allowedEnvironment.Keys) {
+        Assert-True ($childNames -contains $required) "Whitelisted variable missing in child: $required"
+    }
+    foreach ($forbidden in 'OPENAI_API_KEY', 'MEECHO_TOKEN') {
+        Assert-False ($childNames -contains $forbidden) "Sensitive parent variable leaked: $forbidden"
+    }
+
+    $record = Read-MeechoJson -Path $result.RecordPath
+    Assert-SequenceEqual @($allowedEnvironment.Keys | Sort-Object) @($record.environmentNames | Sort-Object) 'Process record must store environment names only.'
+    foreach ($name in $record.environmentNames) {
+        Assert-True ($name -in $allowedEnvironmentNames) "ProcessStartInfo received an unapproved environment name: $name"
+    }
+    $allLogs = (
+        Get-ChildItem -LiteralPath $stepRoot -Recurse -File |
+            ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }
+    ) -join "`n"
+    Assert-False ($allLogs.Contains($secretMarker)) 'A secret marker appeared in audit logs.'
+
+    $rejectedRoot = Join-Path $testRoot 'rejected-environment'
+    $environmentWithExtraName = [ordered]@{}
+    foreach ($entry in $allowedEnvironment.GetEnumerator()) {
+        $environmentWithExtraName[$entry.Key] = $entry.Value
+    }
+    $environmentWithExtraName.MEECHO_DEBUG = '1'
+    Assert-Throws {
+        Invoke-MeechoAuditedProcess `
+            -FilePath (Join-Path $PSHOME 'pwsh.exe') `
+            -ArgumentList @('-NoLogo', '-NoProfile', '-Command', 'exit 0') `
+            -Environment $environmentWithExtraName `
+            -StepLogRoot $rejectedRoot `
+            -StepName 'must-not-run'
+    } 'Audited child execution must reject every non-plan environment name.' 'not in the audited allowlist'
+    Assert-False (Test-Path -LiteralPath (Join-Path $rejectedRoot 'must-not-run.record.json')) 'Rejected environment must not produce a successful process record.'
+
+    $inventoryRoot = Join-Path $testRoot 'inventory'
+    New-Item -ItemType Directory -Path (Join-Path $inventoryRoot 'empty') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $inventoryRoot 'nested') -Force | Out-Null
+    $contentMarker = 'content-' + [guid]::NewGuid().ToString('N')
+    Set-Content -LiteralPath (Join-Path $inventoryRoot 'visible.txt') -Value $contentMarker -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $inventoryRoot 'project-token-not-a-secret.txt') -Value 'ordinary prose' -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $inventoryRoot 'auth.json') -Value ($secretMarker + '-auth') -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path $inventoryRoot 'nested/auth.json') -Value 'nested ordinary fixture' -Encoding UTF8
+
+    $defaultInventory = Get-MeechoFileInventory -Path $inventoryRoot
+    Assert-True (@($defaultInventory | Where-Object path -ceq 'empty').Count -eq 1) 'Inventory must record an empty directory.'
+    Assert-True (@($defaultInventory | Where-Object path -ceq 'auth.json').Count -eq 1) 'Inventory must not silently drop auth.json without an explicit exact exclusion.'
+    Assert-True (@($defaultInventory | Where-Object path -ceq 'project-token-not-a-secret.txt').Count -eq 1) 'Broad key/secret/token matching must not hide ordinary files.'
+    foreach ($entry in $defaultInventory) {
+        Assert-True ($entry.type -in @('directory', 'file')) 'Every inventory entry needs a file-system type.'
+        Assert-False ([string]::IsNullOrWhiteSpace([string]$entry.path)) 'Every inventory entry needs a relative path.'
+        Assert-Matches ([string]$entry.sha256) '^[a-f0-9]{64}$' 'Every inventory entry needs a stable SHA-256.'
+    }
+
+    $explicitInventory = Get-MeechoFileInventory `
+        -Path $inventoryRoot `
+        -ExcludedRelativePath @('auth.json')
+    Assert-False (@($explicitInventory | Where-Object path -ceq 'auth.json').Count -gt 0) 'An explicitly excluded exact auth path must be absent.'
+    Assert-True (@($explicitInventory | Where-Object path -ceq 'nested/auth.json').Count -eq 1) 'Exact authentication exclusions must not expand to same-name files elsewhere.'
+    Assert-False (($explicitInventory | ConvertTo-Json -Depth 20).Contains($contentMarker)) 'Inventory must not include file contents.'
+
+    $before = Get-MeechoFileInventory -Path $inventoryRoot -ExcludedRelativePath @('auth.json')
+    New-Item -ItemType Directory -Path (Join-Path $inventoryRoot 'new-empty-directory') | Out-Null
+    $after = Get-MeechoFileInventory -Path $inventoryRoot -ExcludedRelativePath @('auth.json')
+    $comparison = Compare-MeechoFileInventory -Before $before -After $after
+    Assert-False $comparison.Equal 'Inventory comparison must detect an added empty directory.'
+    Assert-True ($comparison.Added -contains 'new-empty-directory') 'The added empty directory must be named in the comparison.'
+
+    $timestampOnlyInventory = @(
+        $before | ForEach-Object {
+            [pscustomobject][ordered]@{
+                type = $_.type
+                path = $_.path
+                length = $_.length
+                lastWriteTimeUtc = '2099-01-01T00:00:00.0000000Z'
+                sha256 = $_.sha256
+            }
+        }
+    )
+    Assert-Equal (
+        Get-MeechoInventoryContentSha256 -Inventory $before
+    ) (
+        Get-MeechoInventoryContentSha256 -Inventory $timestampOnlyInventory
+    ) 'Fresh control/treatment profile identity must ignore last-write timestamps.'
+    Assert-False (
+        Compare-MeechoFileInventory `
+            -Before $before `
+            -After $timestampOnlyInventory
+    ).Equal 'Full before/after mutation checks must still detect timestamp-only changes.'
+
+    $evidencePath = Join-Path $testRoot 'inventory-evidence/profile-before-inventory.json'
+    $projectedInventory = @(
+        ConvertTo-MeechoInventoryEvidence -Inventory $before
+    )
+    Assert-Equal @($before).Count $projectedInventory.Count 'Evidence projection must preserve every inventory entry.'
+    foreach ($entry in $projectedInventory) {
+        Assert-SequenceEqual @(
+            'type',
+            'path',
+            'length',
+            'sha256'
+        ) @($entry.PSObject.Properties.Name) 'Inventory evidence must expose exactly four safe fields.'
+        Assert-False ([System.IO.Path]::IsPathFullyQualified([string]$entry.path)) 'Inventory evidence paths must remain relative.'
+        Assert-False ([string]$entry.path -match '(^|/)\.\.(/|$)') 'Inventory evidence paths must not traverse upward.'
+    }
+
+    $writtenEvidence = Write-MeechoInventoryEvidence `
+        -Inventory $before `
+        -Path $evidencePath
+    Assert-True (Test-Path -LiteralPath $evidencePath -PathType Leaf) 'Inventory evidence was not written.'
+    Assert-Matches ([string]$writtenEvidence.Sha256) '^[a-f0-9]{64}$' 'Inventory evidence needs a file hash.'
+    Assert-Matches ([string]$writtenEvidence.InventorySha256) '^[a-f0-9]{64}$' 'Inventory evidence needs a content-identity hash.'
+    $loadedEvidence = @(
+        Get-Content -LiteralPath $evidencePath -Raw -Encoding UTF8 |
+            ConvertFrom-Json -Depth 20
+    )
+    Assert-Equal (
+        Get-MeechoInventoryContentSha256 -Inventory $loadedEvidence
+    ) $writtenEvidence.InventorySha256 'Persisted inventory evidence must reproduce its declared content-identity hash.'
+    Assert-Equal (
+        Get-MeechoInventoryContentSha256 -Inventory $before
+    ) $writtenEvidence.InventorySha256 'Evidence projection must retain the original content identity.'
+    $evidenceJson = Get-Content -LiteralPath $evidencePath -Raw -Encoding UTF8
+    Assert-False $evidenceJson.Contains('lastWriteTimeUtc') 'Inventory evidence must not persist timestamps.'
+    Assert-False $evidenceJson.Contains($contentMarker) 'Inventory evidence must not persist file contents.'
+    Assert-False $evidenceJson.Contains($inventoryRoot) 'Inventory evidence must not persist an absolute root.'
+
+    $evidenceFileHashBeforeRefusal = (
+        Get-FileHash -LiteralPath $evidencePath -Algorithm SHA256
+    ).Hash.ToLowerInvariant()
+    Assert-Throws {
+        Write-MeechoInventoryEvidence -Inventory $after -Path $evidencePath
+    } 'Inventory evidence must never overwrite an existing destination.' 'INVENTORY_EVIDENCE_ALREADY_EXISTS'
+    Assert-Equal $evidenceFileHashBeforeRefusal (
+        Get-FileHash -LiteralPath $evidencePath -Algorithm SHA256
+    ).Hash.ToLowerInvariant() 'A refused second write must leave the original evidence unchanged.'
+
+    Assert-Throws {
+        ConvertTo-MeechoInventoryEvidence -Inventory @(
+            [pscustomobject][ordered]@{
+                type = 'file'
+                path = (Join-Path $inventoryRoot 'visible.txt')
+                length = 1
+                sha256 = ('a' * 64)
+            }
+        )
+    } 'Inventory evidence must reject absolute paths.' 'INVENTORY_EVIDENCE_INVALID_PATH'
+
+    $profileEvidenceRoot = Join-Path $testRoot 'profile-evidence'
+    $profileRoot = Join-Path $profileEvidenceRoot 'profile'
+    [void][IO.Directory]::CreateDirectory($profileRoot)
+    $profileContentPath = Join-Path $profileRoot 'preferences.md'
+    [IO.File]::WriteAllText(
+        $profileContentPath,
+        'before-profile-content',
+        [Text.UTF8Encoding]::new($false)
+    )
+    $profileBeforeInventory = @(Get-MeechoFileInventory -Path $profileRoot)
+    $profileBeforeEvidencePath = Join-Path (
+        Join-Path $profileEvidenceRoot 'artifacts'
+    ) 'profile-before-inventory.json'
+    $profileAfterEvidencePath = Join-Path (
+        Join-Path $profileEvidenceRoot 'artifacts'
+    ) 'profile-after-inventory.json'
+    $profileBeforeEvidence = Write-MeechoInventoryEvidence `
+        -Inventory $profileBeforeInventory `
+        -Path $profileBeforeEvidencePath
+    Assert-False (
+        Test-Path -LiteralPath $profileAfterEvidencePath
+    ) 'A missing profile-after inventory must remain observable before the terminal snapshot.'
+
+    [IO.File]::WriteAllText(
+        $profileContentPath,
+        'after-profile-content',
+        [Text.UTF8Encoding]::new($false)
+    )
+    $profileAfterInventory = @(Get-MeechoFileInventory -Path $profileRoot)
+    $profileAfterEvidence = Write-MeechoInventoryEvidence `
+        -Inventory $profileAfterInventory `
+        -Path $profileAfterEvidencePath
+    Assert-True (
+        Test-Path -LiteralPath $profileAfterEvidencePath -PathType Leaf
+    ) 'The terminal profile-after inventory is missing.'
+    Assert-False (
+        $profileBeforeEvidence.InventorySha256 -ceq
+        $profileAfterEvidence.InventorySha256
+    ) 'A profile content change must change the persisted content-identity digest.'
+    Assert-Equal (
+        Get-MeechoInventoryContentSha256 -Inventory $profileAfterInventory
+    ) $profileAfterEvidence.InventorySha256 'The profile-after digest must be recomputable from its fixed evidence file.'
+    $profileAfterFileHash = (
+        Get-FileHash -LiteralPath $profileAfterEvidencePath -Algorithm SHA256
+    ).Hash.ToLowerInvariant()
+    Assert-Throws {
+        Write-MeechoInventoryEvidence `
+            -Inventory $profileBeforeInventory `
+            -Path $profileAfterEvidencePath
+    } 'A second terminal profile-after snapshot must not overwrite the first one.' 'INVENTORY_EVIDENCE_ALREADY_EXISTS'
+    Assert-Equal $profileAfterFileHash (
+        Get-FileHash -LiteralPath $profileAfterEvidencePath -Algorithm SHA256
+    ).Hash.ToLowerInvariant() 'A refused profile-after rewrite must preserve the original evidence.'
+
+    $atomicManifestPath = Join-Path $testRoot 'atomic-manifest/run-manifest.json'
+    $originalManifest = [ordered]@{
+        schemaVersion = 1
+        kind = 'atomic-writer-probe'
+        status = 'original'
+    }
+    Write-MeechoRunManifest -Manifest $originalManifest -Path $atomicManifestPath
+    $originalManifestHash = (
+        Get-FileHash -LiteralPath $atomicManifestPath -Algorithm SHA256
+    ).Hash.ToLowerInvariant()
+    $manifestLock = [IO.File]::Open(
+        $atomicManifestPath,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::None
+    )
+    try {
+        Assert-Throws {
+            Write-MeechoRunManifest `
+                -Manifest ([ordered]@{
+                    schemaVersion = 1
+                    kind = 'atomic-writer-probe'
+                    status = 'replacement'
+                }) `
+                -Path $atomicManifestPath
+        } 'A failed atomic manifest replacement must surface an error.'
+    }
+    finally {
+        $manifestLock.Dispose()
+    }
+    Assert-Equal $originalManifestHash (
+        Get-FileHash -LiteralPath $atomicManifestPath -Algorithm SHA256
+    ).Hash.ToLowerInvariant() 'A failed atomic manifest replacement must preserve the previous complete file.'
+    Assert-Equal 0 @(
+        Get-ChildItem `
+            -LiteralPath (Split-Path -Parent $atomicManifestPath) `
+            -Filter '.*.tmp' `
+            -File
+    ).Count 'A failed atomic manifest replacement must clean its temporary file.'
+
+    Assert-True (Test-MeechoStepRecord -RecordPath $result.RecordPath) 'Untampered step record must validate.'
+    $stepRecord = Read-MeechoJson -Path $result.RecordPath
+    Assert-Matches ([string]$stepRecord.commandSha256) '^[a-f0-9]{64}$' 'A launched executable needs a path-free binary hash.'
+    $originalCommandSha256 = [string]$stepRecord.commandSha256
+    $stepRecord.commandSha256 = 'not-a-sha256'
+    $stepRecord | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $result.RecordPath -Encoding UTF8
+    Assert-False (Test-MeechoStepRecord -RecordPath $result.RecordPath) 'Malformed executable hash must fail step-record validation.'
+    $stepRecord.commandSha256 = $originalCommandSha256
+    $stepRecord | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $result.RecordPath -Encoding UTF8
+    Assert-True (Test-MeechoStepRecord -RecordPath $result.RecordPath) 'Restoring the executable hash should restore the step-record contract.'
+    Add-Content -LiteralPath $result.StdoutPath -Value 'tampered' -Encoding UTF8
+    Assert-False (Test-MeechoStepRecord -RecordPath $result.RecordPath) 'Tampered stdout must fail checksum validation.'
+}
+finally {
+    foreach ($entry in $previousSecrets.GetEnumerator()) {
+        if ($null -eq $entry.Value) {
+            Remove-Item -LiteralPath "Env:$($entry.Key)" -ErrorAction SilentlyContinue
+        }
+        else {
+            Set-Item -LiteralPath "Env:$($entry.Key)" -Value $entry.Value
+        }
+    }
+    if (Test-Path -LiteralPath $testRoot) {
+        Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
 }
 
-$fixture = New-ValidRunFixture
-try {
-    Invoke-Validator -Fixture $fixture -ShouldPass $true -Scenario 'A genuinely valid fixture'
-
-    $firstStep = Join-Path $fixture 'steps/case-01.log'
-    @(Get-Content -LiteralPath $firstStep | Where-Object { $_ -notlike 'action=*' }) |
-        Set-Content -LiteralPath $firstStep -Encoding utf8
-    Write-EvalChecksums -RepositoryRoot $RepositoryRoot -RunDirectory $fixture
-    Invoke-Validator -Fixture $fixture -ShouldPass $false -Scenario 'A step log missing action'
-
-    Write-EvalStepLog -Path $firstStep -Action 'fixture case 01' -Stdout @('case-01-output') -Stderr @() -ExitCode 0 -Conclusion 'passed' -StartedAtUtc ([datetimeoffset]'2099-01-01T00:00:00Z') -EndedAtUtc ([datetimeoffset]'2099-01-01T00:00:01Z')
-    Write-EvalChecksums -RepositoryRoot $RepositoryRoot -RunDirectory $fixture
-    $checksumPath = Join-Path $fixture 'checksums.sha256'
-    $checksumLines = @(Get-Content -LiteralPath $checksumPath)
-    $checksumLines[0] = $checksumLines[0] -replace '^[a-f0-9]{64}', ('0' * 64)
-    $checksumLines | Set-Content -LiteralPath $checksumPath -Encoding utf8
-    Invoke-Validator -Fixture $fixture -ShouldPass $false -Scenario 'A fake checksum'
-
-    Write-EvalChecksums -RepositoryRoot $RepositoryRoot -RunDirectory $fixture
-    $checksumLines = @(Get-Content -LiteralPath $checksumPath)
-    $withoutRubric = @($checksumLines | Where-Object { $_ -notmatch '\s\sevals/rubric\.md$' })
-    Assert-Condition ($withoutRubric.Count -eq ($checksumLines.Count - 1)) 'The fixture checksum set did not contain the required rubric input.'
-    $withoutRubric | Set-Content -LiteralPath $checksumPath -Encoding utf8
-    Invoke-Validator -Fixture $fixture -ShouldPass $false -Scenario 'A checksum set missing a required file'
-} finally {
-    Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-$failureTest = Join-Path ([System.IO.Path]::GetTempPath()) "meecho-deterministic-failure-$([guid]::NewGuid().ToString('N')).ps1"
-try {
-    @(
-        "[Console]::Out.WriteLine('TASK-STDOUT')"
-        "[Console]::Error.WriteLine('TASK-STDERR')"
-        'exit 7'
-    ) | Set-Content -LiteralPath $failureTest -Encoding utf8
-    $taskRunner = Join-Path $RepositoryRoot 'evals/scripts/Invoke-Task1Tests.ps1'
-    $taskResult = Invoke-EvalProcess -FilePath $childPowerShell -ArgumentList @(
-        '-NoProfile', '-File', $taskRunner, '-RepositoryRoot', $RepositoryRoot, '-TestFiles', $failureTest
-    )
-    Assert-Condition ($taskResult.ExitCode -ne 0) 'The unified test runner returned success after a test failed.'
-    $runMatch = [regex]::Match(($taskResult.Stdout -join "`n"), 'TASK1_TEST_RUN_ID=(\d{8}T\d{6}Z)')
-    Assert-Condition $runMatch.Success 'The unified test runner did not report its run ID.'
-    $taskRun = Join-Path $RepositoryRoot "evals/logs/$($runMatch.Groups[1].Value)"
-    $taskManifest = Get-Content -LiteralPath (Join-Path $taskRun 'run-manifest.json') -Raw | ConvertFrom-Json
-    Assert-Condition ($taskManifest.exitCode -eq 1 -and $taskManifest.status -eq 'failed') 'The unified test manifest did not preserve final failure.'
-    $taskStep = Read-EvalStepLog -Path (Join-Path $taskRun $taskManifest.steps[0].log)
-    Assert-Condition (($taskStep.Stdout -join "`n") -match 'TASK-STDOUT') 'The unified runner lost child stdout.'
-    Assert-Condition (($taskStep.Stderr -join "`n") -match 'TASK-STDERR') 'The unified runner lost child stderr.'
-    Assert-Condition (($taskStep.Stdout -join "`n") -notmatch 'TASK-STDERR') 'The unified runner mixed stderr into stdout.'
-    Assert-Condition (($taskStep.Stderr -join "`n") -notmatch 'TASK-STDOUT') 'The unified runner mixed stdout into stderr.'
-    Assert-Condition ($taskStep.ExitCode -eq 7) 'The unified runner step log lost the real child exit code.'
-} finally {
-    Remove-Item -LiteralPath $failureTest -Force -ErrorAction SilentlyContinue
-}
-
-Write-Output 'Shared audit infrastructure behavior passed.'
+Write-Output 'PASS Test-AuditInfrastructure'

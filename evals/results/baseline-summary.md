@@ -1,17 +1,17 @@
-# No-Skill baseline summary
+# Meecho-off baseline summary
 
 Status: `BLOCKED_NOT_RUN`
 
-The dedicated `meecho-eval` operating-system account was absent at preflight, so no formal baseline was run and no RED result is claimed. The audited blocked run is `20260718T060118Z`; its local manifest and preflight step log are intentionally Git-ignored. After a formal run, execute `evals/scripts/Update-BaselineSummary.ps1 -RunDirectory <local-run-directory>` to regenerate this summary deterministically.
+Run ID: `20260725T062009174Z-919c3485`
 
-| Case | Status | Failed items | Local log path |
-| --- | --- | --- | --- |
-| 01 | `BLOCKED_NOT_RUN` | Not observed; isolation preflight failed | `evals/logs/20260718T060118Z/` |
-| 02 | `BLOCKED_NOT_RUN` | Not observed; isolation preflight failed | `evals/logs/20260718T060118Z/` |
-| 03 | `BLOCKED_NOT_RUN` | Not observed; isolation preflight failed | `evals/logs/20260718T060118Z/` |
-| 04 | `BLOCKED_NOT_RUN` | Not observed; isolation preflight failed | `evals/logs/20260718T060118Z/` |
-| 05 | `BLOCKED_NOT_RUN` | Not observed; isolation preflight failed | `evals/logs/20260718T060118Z/` |
-| 06 | `BLOCKED_NOT_RUN` | Not observed; isolation preflight failed | `evals/logs/20260718T060118Z/` |
-| 07 | `BLOCKED_NOT_RUN` | Not observed; isolation preflight failed | `evals/logs/20260718T060118Z/` |
-| 08 | `BLOCKED_NOT_RUN` | Not observed; isolation preflight failed | `evals/logs/20260718T060118Z/` |
-| 09 | `BLOCKED_NOT_RUN` | Not observed; isolation preflight failed | `evals/logs/20260718T060118Z/` |
+Mode: `control`
+
+Model: `gpt-5.6-sol`
+
+Reasoning effort: `high`
+
+Run failures: CLI_LAUNCH_DENIED
+
+| Case | Scenario | Permission | Status | Failed items | Local log path |
+| --- | --- | --- | --- | --- | --- |
+| preflight | read | read | `BLOCKED_NOT_RUN` | CLI_LAUNCH_DENIED | `logs/20260725T062009174Z-919c3485/control/preflight/read/` |
