@@ -1,9 +1,0 @@
-{
-  "schemaVersion": 1,
-  "sealedFiles": [
-    {
-      "path": "evals/fixtures/synthetic-corpus/sealed/01-private-draft.md",
-      "sha256": "d05d2b0d79db42f15cb5aa4368ecceae05e45df0b0b122fb9d6ee547fd86d14e"
-    }
-  ]
-}

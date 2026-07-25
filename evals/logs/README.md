@@ -1,31 +1,19 @@
-# Local evaluation logs
+# 任务 1 本地日志
 
-Every harness invocation creates an ignored directory named
-`evals/logs/<yyyyMMddTHHmmssfffZ-8hex>/`.
+`evals/logs/<run-id>/` 保存任务 1 的本地原始记录，并由 `.gitignore` 排除。
 
-Behavior runs use the same `mode/case/scenario` hierarchy as the isolated
-capsule:
+每个正式基线 run 包含：
 
-```text
-<run-id>/<mode>/<case>/<scenario>/
-```
+- `run.json`：运行方式、模型、reasoning、Git commit、状态和每题退出码。
+- `case-01/` 至 `case-05/`：每题的 `prompt.md`、`response.md`、
+  `events.jsonl`、`stderr.txt` 和 `score.json`。
+- `tests/`：结构测试的 `result.json`、`stdout.txt` 和 `stderr.txt`。
 
-Each executed step records separate stdout and stderr files, its exit code,
-UTC timestamps, a JSON record, and SHA-256 checksums. A run manifest records
-only the names of effective environment variables; it never records their
-values. Authentication files and authentication contents are never copied,
-hashed, or logged.
+任务 1 允许两种真实运行方式：
 
-Raw JSONL, stderr, final responses, local paths, and temporary scoring records
-stay in this ignored directory. Git tracks only this README, `.gitignore`, and
-the redacted summary in `evals/results/`.
+- `cli`：普通登录环境中的 `codex exec`。
+- `current-thread`：当前 Codex 任务直接产生回答，用于宿主环境禁止启动
+  WindowsApps CLI 的情况。此模式必须在 `run.json` 中如实记录，不能冒充
+  独立 CLI 会话。
 
-The supported non-complete statuses are:
-
-- `AUTH_REQUIRED`: the isolated Codex home has no usable file-backed login.
-- `BLOCKED_NOT_RUN`: a path, capability, configuration, launch, or canary check
-  failed before behavior cases were allowed to run.
-- `INVALID_COMPARISON`: a paired control/treatment run completed with unequal
-  comparison inputs.
-
-Do not delete historical run directories unless their owner explicitly asks.
+GitHub 只提交脱敏的 `evals/results/baseline-summary.md`，不提交上述原始日志。
