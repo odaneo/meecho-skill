@@ -3,6 +3,10 @@
 `evals/logs/<run-id>/` 保存开发过程中的原始测试记录，并由 `.gitignore`
 排除。日志只留在本机，不提交到 GitHub。
 
+当前自动检查位于 `evals/contracts/`，只验证静态契约和 fixtures，不执行
+Meecho Skill。早期日志中的“功能测试”是历史名称；它不代表曾经在 CI 中
+运行过 Codex 或大模型。
+
 任务 1 使用 `task1-<UTC 时间>/`，其中包含：
 
 - `red/structure-test.txt`：Plugin 尚不存在时的预期失败输出。
@@ -45,8 +49,8 @@
 
 - `red/write-boundaries-test.txt`：写作、润色和权限协议尚不存在时的预期
   失败输出。
-- `green/write-boundaries-test.txt`：只读文件树、权限拒绝、聊天返回位置和
-  连续汉字复刻保护检查。
+- `green/write-boundaries-test.txt`：历史协议检查记录；其中的文件树不变和
+  复刻边界由当时的测试脚本自行模拟，不代表实际执行过 Meecho。
 - `green/*-test.txt`：任务 1 至任务 4 的回归测试。
 - `green/skill-validator.txt` 和 `green/plugin-validator.txt`：两个官方
   校验器输出。
@@ -64,8 +68,8 @@ DOCX-only 架构修订使用 `docx-plan-revision-<UTC 时间>/`，其中包含�
 任务 6 使用 `task6-<UTC 时间>/`，其中包含：
 
 - `red/docx-fixture-test.txt`：合成 DOCX 尚不存在时的预期失败。
-- `green/*-test.txt`：DOCX 及任务 1–5 的全部功能测试。
-- `green/meecho-dev-validate*.txt`：新开发工具统一运行功能测试的输出。
+- `green/*-test.txt`：DOCX 及任务 1–5 的历史静态检查。
+- `green/meecho-dev-validate*.txt`：开发工具统一运行检查的输出。
 - `render/render-docx.txt`：DOCX 渲染尝试；缺少 LibreOffice 时保留原始失败。
 - `structural-style-audit*.json`：无法渲染时的 OOXML 页面与样式结构审计。
 - `green/skill-validator.txt` 和 `green/plugin-validator.txt`：两个官方

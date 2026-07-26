@@ -119,10 +119,12 @@ GitHub、Plugin 缓存、当前项目或声音档案目录，也不会创建文�
 pwsh ./tools/dev/meecho-dev.ps1 validate
 ```
 
-该命令运行 `evals/functional/Test-*.ps1` 中的全部客观功能测试，并把本地日志
+该命令运行 `evals/contracts/Test-*.ps1` 中的全部静态契约检查，并把本地日志
 保存到被 Git 忽略的 `evals/logs/dev/`。
 
 GitHub Actions 使用 `.github/workflows/validate.yml` 在代码推送、Pull
 Request 和手动触发时执行同一条验证命令。CI 只检查 Plugin／Skill 结构、
-必需文件、运行时和私人文件边界、合成 profile schema 以及 PowerShell 功能
-测试；它不判断文字“像不像”，也不生成风格分数。
+必需文件、运行时和私人文件边界、合成 profile schema 以及 fixtures 的完整
+性。它不会启动 Codex、不会执行 Meecho Skill，也不能证明大模型会遵守
+Markdown 指令。实际客户端行为需要人工端到端验收；风格效果只由用户最终
+盲评。CI 不判断文字“像不像”，也不生成风格分数。

@@ -8,7 +8,6 @@ $skillRoot = Join-Path $repoRoot 'plugins\meecho\skills\meecho'
 $skillPath = Join-Path $skillRoot 'SKILL.md'
 $writeReferencePath = Join-Path $skillRoot 'references\write-and-revise.md'
 $privacyReferencePath = Join-Path $skillRoot 'references\privacy-and-permissions.md'
-$profileFixtureRoot = Join-Path $repoRoot 'evals\fixtures\profile\valid\basic'
 $failures = [System.Collections.Generic.List[string]]::new()
 
 function Test-Fact {
@@ -64,88 +63,7 @@ function Read-JsonContract {
     }
 }
 
-function Get-TreeFingerprint {
-    param(
-        [Parameter(Mandatory)]
-        [string] $Root
-    )
-
-    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
-        return @()
-    }
-
-    return @(
-        Get-ChildItem -LiteralPath $Root -File -Recurse -Force |
-            Sort-Object FullName |
-            ForEach-Object {
-                $relativePath = [IO.Path]::GetRelativePath($Root, $_.FullName).
-                    Replace('\', '/')
-                $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
-                "$relativePath|$hash"
-            }
-    )
-}
-
-function Test-TreeEqual {
-    param(
-        [Parameter(Mandatory)]
-        [AllowEmptyCollection()]
-        [object[]] $Before,
-
-        [Parameter(Mandatory)]
-        [AllowEmptyCollection()]
-        [object[]] $After
-    )
-
-    return (
-        $null -eq (
-            Compare-Object -ReferenceObject $Before -DifferenceObject $After
-        )
-    )
-}
-
-function Remove-Whitespace {
-    param(
-        [AllowEmptyString()]
-        [string] $Text
-    )
-
-    return [regex]::Replace($Text, '\s+', '')
-}
-
-function Test-PrivateChineseOverlap {
-    param(
-        [Parameter(Mandatory)]
-        [string] $PrivateSource,
-
-        [Parameter(Mandatory)]
-        [string] $Candidate,
-
-        [Parameter(Mandatory)]
-        [int] $MinimumLength
-    )
-
-    $normalizedSource = Remove-Whitespace $PrivateSource
-    $normalizedCandidate = Remove-Whitespace $Candidate
-    $chineseRuns = [regex]::Matches(
-        $normalizedCandidate,
-        "[\p{IsCJKUnifiedIdeographs}]{$MinimumLength,}"
-    )
-    foreach ($run in $chineseRuns) {
-        for ($length = $run.Value.Length; $length -ge $MinimumLength; $length--) {
-            for ($start = 0; $start -le $run.Value.Length - $length; $start++) {
-                $fragment = $run.Value.Substring($start, $length)
-                if ($normalizedSource.Contains($fragment)) {
-                    return $true
-                }
-            }
-        }
-    }
-
-    return $false
-}
-
-Write-Host 'Meecho write boundary test'
+Write-Host 'Meecho write and permission static contract check'
 Write-Host "Repository: $repoRoot"
 
 $writeReferenceExists = Test-Path -LiteralPath $writeReferencePath -PathType Leaf
@@ -270,58 +188,6 @@ foreach ($operationName in $expectedOperations.Keys) {
     ) "$operationName 的变更位置、前置条件或输出位置不符合协议。"
 }
 
-$temporaryRoot = Join-Path (
-    [IO.Path]::GetTempPath()
-) ("meecho-write-boundaries-" + [guid]::NewGuid().ToString('N'))
-$projectRoot = Join-Path $temporaryRoot 'project'
-$privateRoot = Join-Path $temporaryRoot 'private-profile'
-New-Item -ItemType Directory -Path $projectRoot -Force | Out-Null
-Copy-Item -LiteralPath $profileFixtureRoot -Destination $privateRoot -Recurse
-Set-Content `
-    -LiteralPath (Join-Path $projectRoot 'user-note.txt') `
-    -Value '合成项目文件，仅用于验证普通写作不落盘。' `
-    -Encoding UTF8
-
-try {
-    $projectBefore = @(Get-TreeFingerprint $projectRoot)
-    $profileBefore = @(Get-TreeFingerprint $privateRoot)
-
-    foreach ($operationName in @('write', 'revise', 'status')) {
-        $chatOutput = "合成的 $operationName 聊天返回值"
-        if ([string]::IsNullOrWhiteSpace($chatOutput)) {
-            throw "$operationName 没有产生聊天返回值。"
-        }
-    }
-
-    $projectAfterReadOnly = @(Get-TreeFingerprint $projectRoot)
-    $profileAfterReadOnly = @(Get-TreeFingerprint $privateRoot)
-    Test-Fact '普通写作、润色和 status 前后项目树不变' (
-        Test-TreeEqual $projectBefore $projectAfterReadOnly
-    ) '只读操作改变了合成项目目录。'
-    Test-Fact '普通写作、润色和 status 前后私人档案不变' (
-        Test-TreeEqual $profileBefore $profileAfterReadOnly
-    ) '只读操作改变了合成私人档案目录。'
-
-    foreach ($operationName in @('build', 'update', 'remember', 'export', 'delete')) {
-        $permissionDecision = '拒绝'
-        if ($permissionDecision -cne '拒绝') {
-            throw '拒绝权限模拟失效。'
-        }
-    }
-
-    $projectAfterDenied = @(Get-TreeFingerprint $projectRoot)
-    $profileAfterDenied = @(Get-TreeFingerprint $privateRoot)
-    Test-Fact '拒绝管理动作后没有项目文件或部分文件' (
-        Test-TreeEqual $projectBefore $projectAfterDenied
-    ) '拒绝权限后合成项目目录发生变化。'
-    Test-Fact '拒绝管理动作后没有档案文件或部分文件' (
-        Test-TreeEqual $profileBefore $profileAfterDenied
-    ) '拒绝权限后合成私人档案目录发生变化。'
-}
-finally {
-    Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
-}
-
 $minimumLength = if ($null -ne $protectionContract) {
     [int] $protectionContract.最小连续汉字数
 }
@@ -333,29 +199,6 @@ Test-Fact '复刻保护阈值固定为 20 个连续汉字' (
     $protectionContract.比较前处理 -ceq '只去除空白字符' -and
     $protectionContract.命中动作 -ceq '停止并重新生成'
 ) '复刻保护阈值、规范化方式或命中动作不正确。'
-
-$privateSource = '私人原文开头。甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉。私人原文结尾。'
-$twentyCharacters = '甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉'
-$nineteenCharacters = '甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳午未申'
-$spacedTwentyCharacters = '甲乙丙丁戊 己庚辛壬癸 子丑寅卯辰 巳午未申酉'
-$unrelatedCharacters = '天地玄黄宇宙洪荒日月盈昃辰宿列张寒来暑往'
-
-Test-Fact '完全相同的 20 个连续汉字会被拦截' (
-    Test-PrivateChineseOverlap $privateSource $twentyCharacters $minimumLength
-) '20 字边界未命中。'
-Test-Fact '只有 19 个连续汉字时不会误拦截' (
-    -not (
-        Test-PrivateChineseOverlap $privateSource $nineteenCharacters $minimumLength
-    )
-) '19 字边界被误判。'
-Test-Fact '插入空白不能绕过 20 字保护' (
-    Test-PrivateChineseOverlap $privateSource $spacedTwentyCharacters $minimumLength
-) '去除空白后应当命中。'
-Test-Fact '无关的连续汉字不会被误拦截' (
-    -not (
-        Test-PrivateChineseOverlap $privateSource $unrelatedCharacters $minimumLength
-    )
-) '无关文字被误判。'
 
 if ($failures.Count -gt 0) {
     Write-Host ''

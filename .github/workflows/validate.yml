@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   validate:
-    name: 运行客观功能测试
+    name: 运行静态契约检查
     runs-on: windows-latest
     timeout-minutes: 10
 
@@ -18,6 +18,6 @@ jobs:
       - name: 检出仓库
         uses: actions/checkout@v6
 
-      - name: 运行 Meecho 验证
+      - name: 检查 Meecho 静态契约
         shell: pwsh
         run: ./tools/dev/meecho-dev.ps1 validate

@@ -91,7 +91,7 @@ function Test-ZipCanOpen {
     }
 }
 
-Write-Host 'Meecho invalid DOCX fixture test'
+Write-Host 'Meecho invalid DOCX fixture integrity check'
 Write-Host "Repository: $repoRoot"
 
 $expected = $null

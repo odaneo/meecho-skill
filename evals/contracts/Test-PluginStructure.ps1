@@ -30,7 +30,7 @@ function Test-Fact {
     $script:failures.Add($FailureMessage)
 }
 
-Write-Host 'Meecho Plugin structure test'
+Write-Host 'Meecho Plugin structure static contract check'
 Write-Host "Repository: $repoRoot"
 
 $manifestExists = Test-Path -LiteralPath $manifestPath -PathType Leaf

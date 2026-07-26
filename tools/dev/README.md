@@ -25,9 +25,12 @@ pwsh .\tools\dev\meecho-dev.ps1 smoke
 
 ### `validate`
 
-运行 `evals/functional/Test-*.ps1` 中的全部客观功能测试。它只检查 Plugin
-结构、调用边界、档案契约、合成语料、权限和 DOCX fixture，不评价任何文字
-的风格。
+运行 `evals/contracts/Test-*.ps1` 中的全部静态契约检查。它检查 Plugin
+结构、调用声明、档案 schema、合成语料和 DOCX fixture 的可验证属性，不评价
+任何文字的风格。
+
+该命令不会启动 Codex，不会执行 Meecho Skill，也不能证明大模型会遵守
+Markdown 指令。实际客户端行为由任务 7 的人工端到端验收负责。
 
 ### `reinstall`
 

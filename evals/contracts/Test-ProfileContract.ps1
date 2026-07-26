@@ -271,7 +271,7 @@ function Test-ProfileFixture {
     return @($errors)
 }
 
-Write-Host 'Meecho profile contract test'
+Write-Host 'Meecho profile fixture contract check'
 Write-Host "Repository: $repoRoot"
 
 Test-Fact '中文档案 schema 参考文件存在' (

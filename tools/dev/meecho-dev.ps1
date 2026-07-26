@@ -156,12 +156,12 @@ function Invoke-Validate {
     $pwsh = (Get-Process -Id $PID).Path
     $tests = @(
         Get-ChildItem -LiteralPath (
-            Join-Path $repoRoot 'evals\functional'
+            Join-Path $repoRoot 'evals\contracts'
         ) -Filter 'Test-*.ps1' -File |
             Sort-Object Name
     )
     if ($tests.Count -eq 0) {
-        throw '没有找到功能测试。'
+        throw '没有找到静态契约检查。'
     }
 
     foreach ($test in $tests) {
@@ -171,7 +171,7 @@ function Invoke-Validate {
             $test.FullName
         ) $test.BaseName
     }
-    Write-Host "[PASS] 全部 $($tests.Count) 个功能测试通过。"
+    Write-Host "[PASS] 全部 $($tests.Count) 个静态契约检查通过。"
 }
 
 function Invoke-Reinstall {

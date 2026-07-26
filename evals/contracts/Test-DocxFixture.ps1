@@ -51,7 +51,7 @@ function Test-ExactSequence {
     return $true
 }
 
-Write-Host 'Meecho DOCX fixture test'
+Write-Host 'Meecho DOCX fixture integrity check'
 Write-Host "Repository: $repoRoot"
 
 $expected = $null

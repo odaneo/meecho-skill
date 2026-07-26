@@ -32,7 +32,7 @@ function Test-Fact {
     $script:failures.Add($FailureMessage)
 }
 
-Write-Host 'Meecho explicit invocation contract test'
+Write-Host 'Meecho explicit invocation static contract check'
 Write-Host "Repository: $repoRoot"
 
 $skillDirectories = @()

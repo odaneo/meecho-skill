@@ -12,7 +12,7 @@ $inventoryPath = Join-Path $repoRoot 'evals\fixtures\build\basic\analysis-inputs
 $targetOnlyInventoryPath = Join-Path $repoRoot 'evals\fixtures\build\target-only\analysis-inputs.json'
 $profileFixtureRoot = Join-Path $repoRoot 'evals\fixtures\profile\valid\basic'
 $profileRoot = Join-Path $profileFixtureRoot 'profiles\target-style'
-$profileContractPath = Join-Path $repoRoot 'evals\functional\Test-ProfileContract.ps1'
+$profileContractPath = Join-Path $repoRoot 'evals\contracts\Test-ProfileContract.ps1'
 $failures = [System.Collections.Generic.List[string]]::new()
 
 function Test-Fact {
@@ -45,7 +45,7 @@ function ConvertTo-NormalizedText {
     return [regex]::Replace($Text, '\s+', '')
 }
 
-Write-Host 'Meecho build boundary test'
+Write-Host 'Meecho build fixture contract check'
 Write-Host "Repository: $repoRoot"
 
 $referenceExists = Test-Path -LiteralPath $buildReferencePath -PathType Leaf
