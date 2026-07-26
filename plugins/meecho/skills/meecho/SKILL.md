@@ -25,6 +25,15 @@ description: 管理和使用本地私人写作声音档案，支持 build、writ
 [`references/build-profile.md`](references/build-profile.md)，按完整作品划分
 证据、排除封存作品，并让用户在写入前审阅事实。
 
+执行 `write` 或 `revise` 时，还必须读取
+[`references/write-and-revise.md`](references/write-and-revise.md)，按内容优先的
+顺序应用必要规则，执行连续汉字复刻保护，并且只在聊天中返回一份正文。
+
+执行任何操作时都必须读取
+[`references/privacy-and-permissions.md`](references/privacy-and-permissions.md)。
+其中的操作矩阵决定哪些动作只读、哪些动作需要写入审批，以及 `delete` 的
+二次确认要求。
+
 ## 严守边界
 
 - 仅在宿主明确激活本技能后继续。
@@ -53,7 +62,7 @@ description: 管理和使用本地私人写作声音档案，支持 build、writ
 
 ## 遵守权限规则
 
-- 将 `status` 视为只读操作。
+- 将 `status`、`write` 和 `revise` 视为只读操作。
 - 执行 `write` 和 `revise` 时，只读取必要的档案内容，并直接在聊天中返回
   完成后的文本。不要创建草稿文件。
 - 执行 `build`、`update` 和 `remember` 时，先显示准备写入的本地档案位置，

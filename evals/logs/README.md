@@ -41,5 +41,16 @@
 - `red/`：旧的时期型 schema、目录和 fixtures 被新契约拒绝的记录。
 - `green/`：目标语料、可选对照语料、无对照语料及全部回归的最终结果。
 
+任务 5 使用 `task5-<UTC 时间>/`，其中包含：
+
+- `red/write-boundaries-test.txt`：写作、润色和权限协议尚不存在时的预期
+  失败输出。
+- `green/write-boundaries-test.txt`：只读文件树、权限拒绝、聊天返回位置和
+  连续汉字复刻保护检查。
+- `green/*-test.txt`：任务 1 至任务 4 的回归测试。
+- `green/skill-validator.txt` 和 `green/plugin-validator.txt`：两个官方
+  校验器输出。
+- `green/result.json`：全部最终退出码和最终状态。
+
 这些日志只记录客观检查结果，例如文件是否存在、JSON 是否合法、目录边界
 是否满足。它们不让模型评价文字风格，也不产生相似度分数。
