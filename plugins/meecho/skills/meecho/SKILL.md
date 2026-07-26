@@ -21,6 +21,10 @@ description: 管理和使用本地私人写作声音档案，支持 build、writ
 [`references/profile-schema.md`](references/profile-schema.md)。严格使用其中的
 根目录、schema、档案文件、备份和删除规则；不得自行补充另一套档案结构。
 
+执行 `build` 或 `update` 时，还必须读取
+[`references/build-profile.md`](references/build-profile.md)，按完整作品划分
+证据、排除封存作品，并让用户在写入前审阅事实。
+
 ## 严守边界
 
 - 仅在宿主明确激活本技能后继续。
@@ -37,7 +41,7 @@ description: 管理和使用本地私人写作声音档案，支持 build、writ
 如果无法确定，只简短列出相关选项。
 
 - `build`：根据用户选定的原始文档首次建立声音档案。
-- `write`：根据主题或要求，使用当前声音档案创作新文本。
+- `write`：根据主题或要求，使用活动声音档案创作新文本。
 - `revise`：在保留事实和原意的前提下修改用户提供的文本。
 - `update`：根据新选定的原始文档更新现有声音档案。
 - `remember`：持久保存用户明确提出的偏好或纠正。

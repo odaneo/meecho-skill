@@ -185,7 +185,7 @@ function Test-ProfileFixture {
             }
         }
         $sourceCounts = $manifest.source_counts
-        foreach ($field in @('historical_works', 'current_context_works')) {
+        foreach ($field in @('target_works', 'contrast_works')) {
             $value = if ($null -ne $sourceCounts) {
                 $sourceCounts.$field
             }
@@ -205,8 +205,8 @@ function Test-ProfileFixture {
     $requiredHeadings = @{
         'style-profile.md' = @('## 已确认规律', '## 反例与边界', '## 不确定结论')
         'attention-lens.md' = @('## 关注对象', '## 观察方式')
-        'voices.md' = @('## 历史声音', '## 当前声音')
-        'preferences.md' = @('## 当前明确偏好', '## 当前明确反感')
+        'voices.md' = @('## 目标声音', '## 对照观察')
+        'preferences.md' = @('## 用户明确偏好', '## 用户明确反感')
     }
     foreach ($fileName in $requiredHeadings.Keys) {
         $path = Join-Path $profileRoot $fileName
@@ -240,7 +240,7 @@ function Test-ProfileFixture {
                 continue
             }
 
-            if ($record.category -notin @('historical_evidence', 'counterexample')) {
+            if ($record.category -notin @('target_evidence', 'counterexample')) {
                 Add-ContractError $errors 'exemplar.category' "第 $lineNumber 行的 category 无效。"
             }
             if (

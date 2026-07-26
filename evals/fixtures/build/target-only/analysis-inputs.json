@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "profile_id": "target-style",
+  "analysis_inputs": [
+    {
+      "work_id": "target-001",
+      "work_family_id": "target-platform",
+      "corpus_role": "target",
+      "relative_path": "target/01-platform-diary.md"
+    },
+    {
+      "work_id": "target-002",
+      "work_family_id": "target-lab",
+      "corpus_role": "target",
+      "relative_path": "target/02-lab-notebook.md"
+    },
+    {
+      "work_id": "target-003",
+      "work_family_id": "target-team",
+      "corpus_role": "target",
+      "relative_path": "target/03-team-notes.md"
+    }
+  ]
+}

@@ -48,7 +48,7 @@
 ```json
 {
   "schema": 1,
-  "active_profile_id": "high-school"
+  "active_profile_id": "target-style"
 }
 ```
 
@@ -79,12 +79,12 @@
 ```json
 {
   "schema": 1,
-  "profile_id": "high-school",
+  "profile_id": "target-style",
   "created_at": "2026-07-26T00:00:00Z",
   "updated_at": "2026-07-26T00:00:00Z",
   "source_counts": {
-    "historical_works": 3,
-    "current_context_works": 1
+    "target_works": 3,
+    "contrast_works": 1
   }
 }
 ```
@@ -93,7 +93,9 @@
 - `created_at` 和 `updated_at` 必须是 UTC 时间。
 - 两个来源计数必须是非负整数。
 - `manifest.json` 不得保存原始文档路径、原文或用户身份信息。
-- 成年时期的文章只计入 `current_context_works`，不得自动当成负面样本。
+- `target_works` 统计用于提炼目标风格的完整作品。
+- `contrast_works` 统计可选的对照作品；没有对照语料时必须为 `0`。
+- 对照语料不得自动当成负面样本或目标风格的反例。
 
 ## 内容文件职责
 
@@ -107,7 +109,7 @@
 ## 不确定结论
 ```
 
-已确认规律必须来自历史作品证据。反例和适用边界必须单独保存。不足以确认的
+已确认规律必须来自目标语料证据。反例和适用边界必须单独保存。不足以确认的
 观察只能进入“不确定结论”，不得伪装成稳定风格规律。
 
 ### `attention-lens.md`
@@ -127,23 +129,24 @@
 至少包含：
 
 ```markdown
-## 历史声音
-## 当前声音
+## 目标声音
+## 对照观察
 ```
 
-历史声音来自旧作证据。当前声音来自成年文章和用户当前表达。两者可以并存，
-不得把差异自动解释为退步，也不得把当前声音自动当成历史声音的反例。
+目标声音来自目标语料证据。对照观察只在用户提供了对照语料时填写；没有对照
+语料时明确写明“未提供对照语料”。不得把两者差异解释成优劣，也不得把对照
+观察自动当成目标声音的反例。
 
 ### `preferences.md`
 
 至少包含：
 
 ```markdown
-## 当前明确偏好
-## 当前明确反感
+## 用户明确偏好
+## 用户明确反感
 ```
 
-这里只保存用户亲口确认的当前偏好和反感。模型从文章推测出的内容不得写入
+这里只保存用户亲口确认的偏好和反感。模型从文章推测出的内容不得写入
 本文件；未确认推测必须留在“不确定结论”。
 
 ### `exemplars.jsonl`
@@ -151,15 +154,15 @@
 每行是一个独立 JSON 对象：
 
 ```json
-{"id":"history-001","category":"historical_evidence","work_id":"hs-001","excerpt":"短例句","note":"支持某条节奏规律"}
-{"id":"counter-001","category":"counterexample","work_id":"hs-002","excerpt":"短例句","note":"说明该规律并非总是成立"}
+{"id":"target-001","category":"target_evidence","work_id":"target-001","excerpt":"短例句","note":"支持某条节奏规律"}
+{"id":"counter-001","category":"counterexample","work_id":"target-002","excerpt":"短例句","note":"说明该规律并非总是成立"}
 ```
 
 规则如下：
 
 - `id` 在当前档案内唯一，只允许小写字母、数字和连字符。
-- `category` 只能是 `historical_evidence` 或 `counterexample`。
-- 当前偏好不得伪装成历史证据。
+- `category` 只能是 `target_evidence` 或 `counterexample`。
+- 用户偏好不得伪装成目标语料证据。
 - 不确定结论不得伪装成例句证据。
 - `work_id` 只保存作品标识，不保存原始文件路径。
 - `excerpt` 必须是非空短例句，最长 120 个字符。

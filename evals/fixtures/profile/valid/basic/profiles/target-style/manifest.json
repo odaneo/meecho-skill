@@ -1,10 +1,10 @@
 {
-  "schema": 2,
-  "profile_id": "high-school",
+  "schema": 1,
+  "profile_id": "target-style",
   "created_at": "2026-07-26T00:00:00Z",
   "updated_at": "2026-07-26T00:00:00Z",
   "source_counts": {
-    "historical_works": 1,
-    "current_context_works": 0
+    "target_works": 3,
+    "contrast_works": 1
   }
 }
