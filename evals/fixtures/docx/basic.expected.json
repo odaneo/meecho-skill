@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "classification": "synthetic",
+  "title": "Meecho DOCX 合成输入",
+  "paragraphs": [
+    "MEECHO-DOCX-FIRST：站台的电子钟停在清晨六点四十分。",
+    "MEECHO-DOCX-MIDDLE：蓝色文件夹被放在长椅中央，封面朝上。",
+    "MEECHO-DOCX-LAST：广播结束后，测试记录到此为止。"
+  ]
+}

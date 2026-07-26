@@ -61,5 +61,16 @@ DOCX-only 架构修订使用 `docx-plan-revision-<UTC 时间>/`，其中包含�
 - `green/result.json`：退出码、最终状态和本次只修改计划及既有中文协议的
   说明。
 
+任务 6 使用 `task6-<UTC 时间>/`，其中包含：
+
+- `red/docx-fixture-test.txt`：合成 DOCX 尚不存在时的预期失败。
+- `green/*-test.txt`：DOCX 及任务 1–5 的全部功能测试。
+- `green/meecho-dev-validate*.txt`：新开发工具统一运行功能测试的输出。
+- `render/render-docx.txt`：DOCX 渲染尝试；缺少 LibreOffice 时保留原始失败。
+- `structural-style-audit*.json`：无法渲染时的 OOXML 页面与样式结构审计。
+- `green/skill-validator.txt` 和 `green/plugin-validator.txt`：两个官方
+  校验器输出。
+- `green/result.json`：全部退出码、最终状态和环境说明。
+
 这些日志只记录客观检查结果，例如文件是否存在、JSON 是否合法、目录边界
 是否满足。它们不让模型评价文字风格，也不产生相似度分数。
