@@ -1,6 +1,6 @@
 {
   "name": "meecho",
-  "version": "0.1.0",
+  "version": "0.1.0+codex.20260726063608",
   "description": "Local-first writing-voice profiles without model training",
   "author": {
     "name": "Meecho contributors"
@@ -13,6 +13,6 @@
     "developerName": "Meecho contributors",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "使用 $meecho:meecho 查看当前本地声音档案状态。"
+    "defaultPrompt": "\u4f7f\u7528 $meecho:meecho \u67e5\u770b\u5f53\u524d\u672c\u5730\u58f0\u97f3\u6863\u6848\u72b6\u6001\u3002"
   }
 }

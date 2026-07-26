@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "classification": "synthetic",
+  "ordinary_user_runtime_required": false,
+  "cases": [
+    {
+      "kind": "unsupported-doc",
+      "file": "unsupported.doc",
+      "sha256": "47E243DA2F397DADA518CCD35C7836531713A6A60C83565E1A34DBD1908FF80E",
+      "description": "V1 不支持 .doc"
+    },
+    {
+      "kind": "macro-enabled-docm",
+      "file": "macro-enabled.docm",
+      "sha256": "5AE96D46768CDB24404895641A3DC1D5B0E9EA645D54FB2503277E2BBBFCFDE8",
+      "description": "V1 不支持 .docm"
+    },
+    {
+      "kind": "corrupt-docx",
+      "file": "corrupt.docx",
+      "sha256": "F39CA9BFF29FEC91C91E86D44D427FCAB9EACDBEAE27DEF8176B4090447805CE",
+      "description": "ZIP 中央目录损坏"
+    },
+    {
+      "kind": "encrypted-docx",
+      "file": "encrypted.docx",
+      "sha256": "5BC84EC5E31395B14BDD5756A3B6CEE38473C7AF36E890B82B4036254201C472",
+      "description": "密码加密的 Office CFB 容器"
+    },
+    {
+      "kind": "disguised-docx",
+      "file": "disguised.docx",
+      "sha256": "3F2879B4BE01D351832E2F7567F4F8C2EA83E6F2AD5D5FC073E91023148349DD",
+      "description": "RTF 内容伪装成 .docx"
+    }
+  ]
+}
