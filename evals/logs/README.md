@@ -52,5 +52,14 @@
   校验器输出。
 - `green/result.json`：全部最终退出码和最终状态。
 
+DOCX-only 架构修订使用 `docx-plan-revision-<UTC 时间>/`，其中包含：
+
+- `green/*-test.txt`：任务 1 至任务 5 的全部回归测试。
+- `green/skill-validator.txt` 和 `green/plugin-validator.txt`：两个官方
+  校验器输出。
+- `green/diff-check.txt`：补丁格式检查。
+- `green/result.json`：退出码、最终状态和本次只修改计划及既有中文协议的
+  说明。
+
 这些日志只记录客观检查结果，例如文件是否存在、JSON 是否合法、目录边界
 是否满足。它们不让模型评价文字风格，也不产生相似度分数。

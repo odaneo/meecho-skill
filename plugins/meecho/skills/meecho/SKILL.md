@@ -23,7 +23,8 @@ description: 管理和使用本地私人写作声音档案，支持 build、writ
 
 执行 `build` 或 `update` 时，还必须读取
 [`references/build-profile.md`](references/build-profile.md)，按完整作品划分
-证据、排除封存作品，并让用户在写入前审阅事实。
+证据、排除封存作品，并让用户在写入前审阅事实。V1 只接受有效、未加密的
+`.docx`；使用当前 Codex 宿主已有的文档能力读取，不安装或调用文档转换器。
 
 执行 `write` 或 `revise` 时，还必须读取
 [`references/write-and-revise.md`](references/write-and-revise.md)，按内容优先的
