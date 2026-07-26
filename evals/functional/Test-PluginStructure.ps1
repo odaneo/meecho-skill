@@ -134,7 +134,7 @@ if (Test-Path -LiteralPath $pluginRoot -PathType Container) {
     $privateFiles = @(
         Get-ChildItem -LiteralPath $pluginRoot -File -Recurse |
             Where-Object {
-                $_.Extension -in @('.doc', '.docx', '.odt', '.rtf') -or
+                $_.Extension -in @('.doc', '.docx', '.docm', '.dotx', '.odt', '.rtf', '.pdf') -or
                 $_.FullName -match '[\\/](corpus|profiles|private|source-documents)[\\/]'
             }
     )
