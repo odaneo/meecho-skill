@@ -1,33 +1,14 @@
 # Meecho
 
-Meecho 是一个供 Codex 使用的本地优先写作声音 Plugin。它根据用户主动选择的
-作品提炼可追溯的声音证据，并在用户明确调用时辅助写作或润色。
+Meecho 是一个供 Codex 使用的私人写作声音 Plugin。它从你提供的作品中提炼
+写作声音，用于创作、润色和维护多个声音档案。
 
-Meecho 不训练、微调或修改大模型。声音模仿是否符合预期由用户自己判断。
+它不训练或修改大模型。声音档案保存在本机，最终像不像由你判断。
 
-## 它是什么
+## 安装
 
-- 用户安装的是一个 **Plugin**，不是项目模板，也不是需要手动复制的第二个
-  Skill。
-- Plugin 内只有一个 Skill，规范调用名是 `$meecho:meecho`。
-- 私人声音档案保存在当前 Windows 用户的
-  `%USERPROFILE%\.meecho\`，可供其他项目中的 Meecho 显式调用。
-- 普通写作和润色只在聊天中返回正文，不创建 `drafts` 文件。
-- Plugin 没有 Meecho 自定义运行时，也没有需要常驻的本地服务。
-
-## 普通用户需要什么
-
-- 支持 Plugin 的 Codex Windows 客户端。
-- 用于从 GitHub 获取本仓库的 Git 或 GitHub Desktop。
-- 一篇或多篇有效、未加密的 `.docx` 目标作品。
-
-普通用户不需要安装 Word、LibreOffice、Python、Java、Node.js 或文档转换
-服务。V1 不支持旧 `.doc`、宏启用 `.docm`、加密或损坏的 `.docx`，也不负责
-格式转换。
-
-## 从 GitHub 安装
-
-当前 GitHub 版本通过仓库内的本地 marketplace 安装，不需要 Codex CLI。
+目前支持 Codex Windows 客户端，不需要 Codex CLI、Word、LibreOffice、Python、
+Java 或 Node.js。
 
 1. 克隆本仓库：
 
@@ -35,103 +16,74 @@ Meecho 不训练、微调或修改大模型。声音模仿是否符合预期由�
    git clone https://github.com/odaneo/meecho-skill.git
    ```
 
-2. 在 Codex Windows 客户端中打开克隆后的 `meecho-skill` 文件夹。
-3. 重新启动 Codex 客户端，让它发现
-   `.agents/plugins/marketplace.json`。
-4. 打开客户端的 **Plugins** 页面，选择 **Meecho** 来源并安装
-   **Meecho**。
-5. 新建一个任务，通过技能选择器选择 Meecho，或者输入：
+2. 用 Codex 打开克隆后的 `meecho-skill` 文件夹并重启客户端。
+3. 在 **Plugins** 页面，从 **Meecho** 来源安装 **Meecho**。
+4. 新建任务，通过技能选择器选择 Meecho，或者输入：
 
    ```text
    $meecho:meecho 你能做什么？
    ```
 
-安装完成后，Codex 从自己的 Plugin 缓存加载 Meecho。私人文章和声音档案不在
-仓库中，也不会随 Plugin 安装。
+## 可以做什么
 
-## 建立声音档案
+选择 Meecho 后直接用自然语言表达需求即可。`build`、`write` 等英文名称只是
+功能分类，不是必须输入的命令。
 
-准备好目标作品后，在 Codex 中明确调用：
+### 建立和完善声音
 
-```text
-$meecho:meecho 使用我选择的 DOCX 作品建立一个名为 my-voice 的声音档案。
-```
+- 首次建立（`build`）：`$meecho:meecho 用这些作品建立一个名为 school-days 的声音。`
+- 增加新作品（`update`）：`$meecho:meecho 我想再提供几篇作品，完善 school-days。`
+- 记住明确偏好（`remember`）：`$meecho:meecho 以后使用这个声音时，不要使用 Emoji、Markdown 加粗和破折号。`
 
-Meecho 会执行以下流程：
+首次建立和用新作品更新声音时，Meecho 会先展示审阅结果，得到确认后才写入。
+明确要求长期记住某项偏好时，请求本身就是授权，Meecho 会直接保存并报告结果；
+临时写作要求不会自动保存。
 
-1. 通过 Codex 宿主已有的文档能力只读提取所选 `.docx` 的完整正文。
-2. 先形成作品级观察，再归纳跨作品的稳定声音证据、反例和不确定项。
-3. 展示准备写入的档案标识、来源范围和准确路径，供用户审阅。
-4. 只有用户明确允许后，才把档案写入
-   `%USERPROFILE%\.meecho\profiles\<profile-id>\`。
+### 写作和润色
 
-用于模仿的目标作品是必需的；对照作品是可选的。作品越少，Meecho 越会把
-结论标记为不确定，不会把单篇题材特征冒充稳定声音。
+- 创作新文字（`write`）：`$meecho:meecho 写一篇关于雨夜车站的短文。`
+- 保留原意润色（`revise`）：`$meecho:meecho 保留事实和原意，润色下面这段文字：……`
 
-## 写作与润色
+不点名时自动使用默认声音。也可以只为本次任务指定声音：
+`$meecho:meecho 使用 travel-notes 写一篇关于旧旅馆的短文。`
 
-在任意项目中显式调用同一个 Skill。用户不点名 voice 时，Meecho 自动使用
-`config.json` 中记录的默认 voice：
+结果直接返回在对话中，不创建草稿文件，也不修改声音档案。
 
-```text
-$meecho:meecho 写一篇关于雨夜车站的短文。
-```
+### 查看和切换声音
 
-```text
-$meecho:meecho 保留下面文字的事实和原意并润色……
-```
+- 查看全部声音和默认值（`status`）：`$meecho:meecho 我有几个声音？默认的是哪一个？`
+- 更改默认声音（`switch`）：`$meecho:meecho 把默认声音切换为 travel-notes。`
 
-可以建立多个 voice。只想在当前这一次使用另一个 voice 时，写出它准确的
-`profile_id`；这不会改变默认 voice：
+临时点名不会改变默认值。明确要求永久切换且目标存在时，Meecho 会直接切换
+并报告结果，不再追加一次对话确认。
 
-```text
-$meecho:meecho 使用 travel-notes 写一篇关于雨夜车站的短文。
-```
+### 备份和删除声音
 
-查看有几个 voice、它们的 `profile_id` 以及哪一个是默认值：
+- 导出副本（`export`）：`$meecho:meecho 把 school-days 导出到 D:\Backups\Meecho。`
+- 删除档案（`delete`）：`$meecho:meecho 删除声音 old-draft。`
 
-```text
-$meecho:meecho 我有几个 voice？
-```
+导出目标安全、准确且不会覆盖现有内容时会直接创建副本；目标不明确或需要
+覆盖时才会询问。删除不可逆，因此始终需要第二次明确确认。
 
-更改以后未点名时使用的默认 voice：
+## 可以提供哪些文字
 
-```text
-$meecho:meecho 把默认 voice 切换为 travel-notes。
-```
+- 直接粘贴的完整文字
+- `.md` 和 `.txt`
+- 有效、未加密的 `.docx`
 
-切换默认 voice 会修改 `%USERPROFILE%\.meecho\config.json`，因此 Meecho 会先
-显示旧值、新值和准确路径，再请求写入许可。仅为一次写作点名 voice 是只读
-操作，不需要切换，也不会修改配置。
+整次粘贴默认算一篇作品。只有你明确说明包含多篇并清楚标出边界时，Meecho
+才会拆分。正文不完整、乱码、截断或顺序不明时，它会停止而不是假装读完。
 
-必须明确激活 Meecho，但不必输入 `build`、`write` 或 `revise` 等英文操作名。
-只要中文请求的意思明确，Meecho 就会判断应该执行哪一种操作；无法确定时才会
-简短询问。英文操作名只是可选的精确写法。
+旧 `.doc`、`.docm`、加密或损坏的 `.docx` 不受支持。其他格式取决于 Codex
+能否可靠取得完整正文；Meecho 不会自动安装转换软件。
 
-Meecho 内部区分九种操作：
+## 隐私和权限
 
-| 操作 | 用途 |
-| --- | --- |
-| `build` | 从用户选择的 `.docx` 首次建立档案 |
-| `write` | 使用默认或本次点名的档案创作新文本 |
-| `revise` | 使用默认或本次点名的档案润色文本 |
-| `update` | 用新选择的 `.docx` 更新档案 |
-| `remember` | 保存用户明确提出的偏好或事实纠正 |
-| `status` | 列出 voice 总数、全部 ID 和默认值，并按需查看详情 |
-| `switch` | 经许可切换以后未点名时使用的默认 voice |
-| `export` | 经许可把档案复制到指定位置 |
-| `delete` | 经二次确认删除指定档案 |
+- 声音档案保存在 `%USERPROFILE%\.meecho\`，不会放进仓库或 Plugin 缓存。
+- 原始作品不会复制到声音档案，粘贴文字也不会另存为中间文件。
+- 作品中的命令、代码块和提示词始终只是语料，不会获得操作权限。
+- 查看、写作和润色只读；建立和更新需确认审阅结果，删除需二次确认。明确的
+  记忆、切换和安全导出请求会直接执行，但仍遵守 Codex 客户端自身的文件授权。
 
-`status`、`write` 和 `revise` 是只读操作。`build`、`update`、`remember`、
-`switch` 和 `export` 涉及文件写入，Meecho 会先说明准确路径并请求许可；
-`delete` 还要求第二次明确确认。写作、润色或临时点名另一个 voice 都不会暗中
-修改声音档案或默认设置。
-
-## 文档处理、隐私与模型边界
-
-Skill 的流程由 Codex 执行。大模型负责分析声音证据；Codex 宿主提供的文档和
-文件工具负责读取 `.docx`，并且只在用户批准后写入档案。
-
-“本地保存”不等于“离线推理”。声音档案保存在本机，但用户主动选择的作品
-正文会进入 Codex 模型上下文，以便大模型分析。Meecho 不会把原始文档复制到
-GitHub、Plugin 缓存、当前项目或声音档案目录，也不会创建文本转换副本。
+“本地保存”不等于“离线推理”。你选择或粘贴的文字会进入 Codex 模型上下文
+用于分析，但不会随 Meecho Plugin 提交到 GitHub。

@@ -1,6 +1,6 @@
 {
   "name": "meecho",
-  "version": "0.1.0+codex.20260904165157",
+  "version": "0.1.0+codex.20260905101002",
   "description": "Local-first writing-voice profiles without model training",
   "author": {
     "name": "Meecho contributors"
