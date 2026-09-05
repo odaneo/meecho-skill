@@ -1,0 +1,20 @@
+{
+  "name": "meecho",
+  "interface": {
+    "displayName": "Meecho"
+  },
+  "plugins": [
+    {
+      "name": "meecho",
+      "source": {
+        "source": "local",
+        "path": "./plugins/meecho"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

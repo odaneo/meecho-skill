@@ -1,0 +1,42 @@
+# 私人语料与 Meecho 本地档案
+meecho-input/
+.meecho/
+private/
+_private/
+profiles/
+backups/
+evaluations/
+**/style-profile.md
+**/attention-lens.md
+**/voices.md
+**/exemplars.jsonl
+**/preferences.md
+
+# 仅保存在本机的研发材料
+.superpowers/
+.codex/
+.github/
+docs/
+evals/
+tools/
+
+# 不允许进入公开仓库的文档语料
+*.doc
+*.docx
+*.docm
+*.dotx
+*.odt
+*.rtf
+*.pdf
+
+# 本地配置、日志与临时文件
+.env
+.env.*
+*.log
+*.tmp
+*.bak
+Thumbs.db
+.DS_Store
+__pycache__/
+*.pyc
+node_modules/
