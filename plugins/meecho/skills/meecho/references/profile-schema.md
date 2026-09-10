@@ -1,37 +1,45 @@
 # 全局私人声音档案规范
 
 本文件定义 Meecho 档案结构的第一个稳定版本。所有档案文件的持久化副本只
-保存在用户本机，不得进入插件目录、项目目录、插件缓存或 Git。
+保存在用户本机，不得进入 Skill 安装目录、项目目录、客户端缓存或 Git。
 
-执行 Meecho 操作时，Codex 只把完成当前请求所必需的档案内容放入模型上下文。
+执行 Meecho 操作时，当前客户端只把完成当前请求所必需的档案内容放入模型上下文。
 “持久化副本只保存在本机”不代表完全离线推理，也不得声称档案内容从未经过
 模型服务。
 
 ## 固定根目录
 
-唯一根目录为：
+逻辑上的唯一根目录为：
 
 ```text
-%USERPROFILE%\.meecho\
+<USER_HOME>/.meecho/
 ```
 
-不得允许用户通过配置文件改写这个根目录。访问任何档案前，先取得规范化的
-绝对路径，再确认它仍位于这个根目录之内。
+`<USER_HOME>` 必须由当前操作系统提供的当前用户主目录推导，不得从项目目录、
+仓库目录或客户端缓存推测。平台映射为：
 
 ```text
-%USERPROFILE%\.meecho\
+Windows: %USERPROFILE%\.meecho\
+POSIX:   $HOME/.meecho/
+```
+
+不得允许用户通过配置文件改写这个根目录。`.meecho` 根目录本身不得是符号链接、目录联接或其他重解析点。访问任何档案前，先取得规范化的绝对路径，再确认它
+仍位于这个根目录之内。
+
+```text
+<USER_HOME>/.meecho/
 ├── config.json
-├── profiles\
-│   └── <profile-id>\
+├── profiles/
+│   └── <profile-id>/
 │       ├── manifest.json
 │       ├── style-profile.md
 │       ├── attention-lens.md
 │       ├── voices.md
 │       ├── exemplars.jsonl
 │       └── preferences.md
-└── backups\
-    └── <profile-id>\
-        └── <UTC-timestamp>\
+└── backups/
+    └── <profile-id>/
+        └── <UTC-timestamp>/
 ```
 
 原始作品文件、用户直接粘贴的文字及其正文不属于档案目录。档案只能保存结构化
@@ -67,11 +75,11 @@
 任意档案路径都只能由经过校验的 `profile_id` 按下式推导：
 
 ```text
-%USERPROFILE%\.meecho\profiles\<profile_id>\
+<USER_HOME>/.meecho/profiles/<profile_id>/
 ```
 
 配置文件中不得出现自定义路径。拒绝绝对路径、`.`、`..`、斜杠、反斜杠、
-符号链接、目录联接和其他重解析点。规范化后的档案路径必须仍是 `profiles\`
+符号链接、目录联接和其他重解析点。规范化后的档案路径必须仍是 `profiles/`
 的直接子目录。
 
 如果尚未建立档案，`.meecho` 和 `config.json` 可以都不存在。不得为了
@@ -86,7 +94,7 @@
 4. 点名不存在、点名不唯一或表达含糊时，列出合法 `profile_id` 并请用户
    明确选择；不得擅自回退到默认档案。
 
-`status` 通过只读枚举 `profiles\` 的直接子目录列出 voice。只有名称符合
+`status` 通过只读枚举 `profiles/` 的直接子目录列出 voice。只有名称符合
 `profile_id` 规则、目录不是链接或重解析点、`manifest.json` 与目录名一致，
 且六个必需档案文件齐全的目录才计入合法总数。输出必须包含合法 voice 总数、
 全部合法 `profile_id`，并在其中标出 `active_profile_id` 对应的默认 voice。
@@ -199,7 +207,7 @@
 3. 将现有档案完整复制到：
 
 ```text
-%USERPROFILE%\.meecho\backups\<profile-id>\<UTC-timestamp>\
+<USER_HOME>/.meecho/backups/<profile-id>/<UTC-timestamp>/
 ```
 
 4. 确认备份成功后，才写入临时目录。
